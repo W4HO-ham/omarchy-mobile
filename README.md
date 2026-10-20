@@ -14,6 +14,8 @@ Native Omarchy on Google Pixel phones: Arch Linux ARM, Hyprland and Omarchy's ow
 
 The installer is new: expect rough edges. You need a Pixel 7 Pro with an unlocked bootloader, an Omarchy (Arch) laptop with Docker, `android-tools` and `e2fsprogs`, and Google's factory image for the phone. Stock Android stays on slot A as the way back; installing erases `userdata`.
 
+On a phone that has only run stock Android, run `fastboot oem disable-verity` and `fastboot oem disable-verification` once before installing: without them slot B never boots (a blank screen, then back to fastboot after about 55 s; #11).
+
 ```sh
 tools/build-packages                 # Omarchy Mobile's packages for aarch64 (out/repo)
 tools/build-rootfs                   # the root image: Arch Linux ARM, Omarchy, our packages
