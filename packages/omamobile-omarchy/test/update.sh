@@ -96,6 +96,7 @@ good_conf() { printf '[options]\nArchitecture = aarch64\n\n[omamobile]\nInclude 
 mkdir -p "$t/modules/$(uname -r)" "$t/omarchy/migrations" "$HOME/.local/state/omarchy/migrations"
 printf 'echo "Rebuild the Limine entries"\nsudo limine-update\n' >"$t/omarchy/migrations/1790000001.sh"
 printf 'echo "Tweak the bar"\ntrue\n' >"$t/omarchy/migrations/1790000002.sh"
+printf 'echo "Prioritize the Omarchy package repository"\nsudo install -m 644 -o root -g root "$pacman_config" /etc/pacman.conf\n' >"$t/omarchy/migrations/1790000004.sh"
 printf 'echo "Old one"\nsudo limine-update\n' >"$t/omarchy/migrations/1700000000.sh"
 touch "$HOME/.local/state/omarchy/migrations/1700000000.sh"
 echo "omarchy 4.0.4-2 -> 4.0.5-1" >"$t/updates"
@@ -158,6 +159,7 @@ ok "sudo during the update is non-interactive" 'grep -c "^sudo -n env OMARCHY_UP
 ok "pacman -Syu went through Omarchy's call" 'grep -c "^pacman -Syu --noconfirm" "$calls" >/dev/null'
 ok "migrations: Omarchy's migrate runs after the holds" 'grep -c "^real-migrate" "$calls" >/dev/null'
 ok "migrations: the Limine one is held and marked done" '[[ -f $HOME/.local/state/omarchy/migrations/1790000001.sh ]] && grep -c "^1790000001.sh	limine" $HOME/.local/state/omamobile/update/held-migrations >/dev/null'
+ok "migrations: one that replaces pacman.conf is held" '[[ -f $HOME/.local/state/omarchy/migrations/1790000004.sh ]] && grep -c "^1790000004.sh	install -m 644 -o root -g root \"\$pacman_config\" /etc/pacman.conf" $HOME/.local/state/omamobile/update/held-migrations >/dev/null'
 ok "migrations: the harmless one is left to Omarchy" '[[ ! -f $HOME/.local/state/omarchy/migrations/1790000002.sh ]]'
 ok "migrations: one already done is not held again" '! grep -c "^1700000000.sh" $HOME/.local/state/omamobile/update/held-migrations >/dev/null'
 ok "result lists the held migration" 'python3 -c "import json; d=json.load(open(\"$last\")); assert d[\"held\"][0][:2] == [\"1790000001.sh\", \"limine\"]"'

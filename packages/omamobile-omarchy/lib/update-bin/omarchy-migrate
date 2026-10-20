@@ -4,6 +4,10 @@
 # minus the ones that touch what a phone doesn't have or must not change: the
 # bootloader and boot entries (Limine, mkinitcpio, UKIs, efibootmgr, sbctl),
 # Snapper, x86 kernels and drivers, fwupd, or that ask questions with gum.
+# Also held: one that replaces /etc/pacman.conf wholesale (install or cp over
+# it, or omarchy-refresh-pacman). 1791403252 moved [omarchy] above every other
+# repository, [omamobile] included, then upgraded, so Omarchy's Hyprland
+# replaced the phone's.
 # A held migration is marked done in Omarchy's state (so Omarchy's login
 # notice doesn't keep offering it) and listed in
 # ~/.local/state/omamobile/update/held-migrations; after a review,
@@ -14,7 +18,7 @@ case ${1:-} in
   --pending | --check | -h | --help) exec "$real" "$@" ;;
 esac
 
-pattern='limine|mkinitcpio|initcpio|efibootmgr|sbctl|snapper|grub-|bootctl|fwupd|/boot/|plymouth-set-default-theme|dracut|linux-omarchy|nvidia|gum (confirm|choose|input|write|filter|file)'
+pattern='limine|mkinitcpio|initcpio|efibootmgr|sbctl|snapper|grub-|bootctl|fwupd|/boot/|plymouth-set-default-theme|dracut|linux-omarchy|nvidia|gum (confirm|choose|input|write|filter|file)|install [^|;]*/etc/pacman\.conf|cp [^|;]* /etc/pacman\.conf|omarchy-refresh-pacman'
 if [[ ${OMAMOBILE_HOLD_MIGRATIONS:-1} == 1 ]]; then
   omarchy_path=${OMARCHY_PATH:-/usr/share/omarchy}
   state=${OMARCHY_MIGRATION_STATE:-$HOME/.local/state/omarchy/migrations}
