@@ -115,11 +115,13 @@ The stock vendor-kernel boot base-DTB candidates carry these
 
 The prototype's IPOP pair matches base 3. This does not distinguish this
 unit's A0 versus A1 silicon, nor replace an equalised-stock live-DT capture.
-The descriptor records that pair with #27's concrete syntax:
+The descriptor keeps that pair **commented out**, using #27's syntax:
 `a0-ipop:0x9875:0:0:1 a1-ipop:0x9875:0:1:1`. This device PR supplies
 selector data only. Shared SOC_COMPATIBLE tooling and its images-layout
 tests remain in the separate tooling PR, alongside zuma's requirements.
-Current public tools still refuse tegu because SOC_IDS is absent.
+Both SOC_IDS and SOC_COMPATIBLE stay unset, so this descriptor remains
+refused even when #27 accepts either selector. Activation belongs with the
+public DTB and required AVB footer values in a later PR.
 
 **Header values verified:** the descriptor uses OS_VERSION=16.0.0 and
 OS_PATCH_LEVEL=2025-09 from this stock build’s init_boot header.
@@ -131,7 +133,7 @@ header values, now backed by both OTA completions, both-slot signed AVB
 metadata for BP3A and the successful stock-A build-property check. A
 stock-B Android boot is not claimed.
 
-## Verified on the prototype
+## Verified before firmware equalisation (old B, HCRX bypass, KVM off)
 
 | Area | Observation [V] |
 | --- | --- |
@@ -163,6 +165,29 @@ The prototype still has a 45-second storage qualification delay. Cold
 power-on, unplug/replug, buttons, battery/charging/thermal policy, suspend
 and the other phone peripherals are not qualified.
 
+### Exact private restoration path
+
+The post-OTA restore used a private checkout at
+`/tmp/tegu-maintenance-tools`, based on this repository's main plus the
+proposed #27 selector support and the previously qualified development
+`flash` function. This was not the unchanged public `bin/omamobile`.
+The command was `bin/omamobile flash --no-reboot --rootfs <verified-image>
+--rootfs-sha256 <verified-sha256>`, with DEVICE=tegu and the pinned image
+output selected. The regular ext4 image was 32 GiB, labelled
+`omamobile-root`, reconstructed from the verified Linux file backup with
+matching modules and checked ownership, ACLs, xattrs and special files.
+It was flashed to shared `userdata`; no Android partition was mounted
+read-write and no main-LUN device was recreated.
+
+The retained flash log names exactly `boot_b`, `init_boot_b`,
+`vendor_boot_b`, `vendor_kernel_boot_b`, `dtbo_b`, plus `userdata`.
+The private flash function did **not** pass an explicit `-s <serial>`;
+it relied on the connected-device/product check. I cannot confirm serial
+binding for those historical writes. Future Fastboot operations will use
+an explicit serial selection. No additional flash is needed to correct
+this record. Slot selection and boot were separately performed by ABL's
+Fastboot commands, not by a devinfo set-active write.
+
 ## Bring-up findings and descriptor facts
 
 - [V] Initial malformed embedded AVB metadata failed before handoff.
@@ -178,7 +203,7 @@ and the other phone peripherals are not qualified.
   path, LDO4M/LDO25M and AVDD-before-VDD sequencing enabled v1 identification
   and the existing S3908 driver; this did not need a v2 protocol port.
 - [V] G715 startup needed Google's GPL ASN/L2 hash values through Panthor's
-  existing SoC-data mechanism (source below), plus the full upstream Mesa architecture11
+  existing SoC-data mechanism (source below), plus the full upstream Mesa architecture 11
   backports. Tested system Mesa: `1:26.2.4-1.4`. No GPU protection-permission
   change was used.
 - [V] Prototype container metadata: Android v4, five boot images,
@@ -194,17 +219,18 @@ The unit began with different slot firmware versions. Recorded prototype
 image writes targeted B; no stock-firmware update or downgrade is recorded
 in those tests. This does not establish that A was factory-identical.
 
-[V] R2 finds A's vbmeta flags at 3, versus factory 0. In the declared
-factory image prefix, only byte 123 differs. The captured header signature
-does not verify as-is; resetting that byte in an **offline copy** exactly
+[V] Before the OTA, R2 found A's vbmeta flags at 3, versus factory 0. In the declared
+factory image prefix, only byte 123 differs. That captured header signature
+did not verify as-is; resetting that byte in an **offline copy** exactly
 matches the official factory image. No such change was written to the
 phone during this audit; the history of the flag change is not established.
-All five actual A boot images separately match the official BP3A OTA's
-stock images. A's vbmeta_system signature is valid and its declared image
-matches the official OTA. Do not describe A's complete verification state
-as pristine, or infer that the current B images are verified by stock AVB.
+At that audit, all five actual A boot images separately matched the official BP3A OTA's
+stock images. A's vbmeta_system signature was valid and its declared image
+matched the official OTA. The two subsequent official OTA passes restored
+flags 0 on both slots; the post-OTA signature/build checks are recorded
+above. This does not imply the custom B images are verified by stock AVB.
 
-An earlier private bring-up note from2026-10-20 records that
+An earlier private bring-up note from 2026-10-20 records that
 `fastboot oem disable-verity` and `fastboot oem disable-verification`
 returned OKAY after unlocking. This is a historical note, not a retained
 before/after vbmeta comparison; it does not establish which command
@@ -225,10 +251,14 @@ that byte `0x35` alone changed by setting B's successful bit (`OR 0x02`).
 The full 8192-byte comparison verified slot A and every other byte unchanged;
 devinfo was restored read-only and the storage guard checked over a fresh
 SSH connection. The generic boot-success service remains masked.
-This is evidence of the bounded operation, not maintainer agreement that
-the tegu layout is supported. **No further tegu devinfo writes until the
-maintainer agrees the layout matches.** Do not unmask the generic service
-or run a marking command as part of the retest.
+After that earlier write, `fastboot getvar slot-successful:b` returned
+`yes`: ABL read the same successful bit the marker had set. The retained
+Fastboot captures confirm this independently of the Linux parser.
+This was evidence of the bounded operation; further writes were held
+while the maintainer reviewed the paired layout evidence below. On
+2026-10-22 the maintainer agreed **mark-successful for B only**, after a
+fresh backup and checksum immediately before the write. No set-active
+or other devinfo write is agreed. Keep the generic service masked.
 
 ### Read-only layout evidence after official OTA maintenance
 
@@ -243,11 +273,41 @@ intervening marking, slot selection or flash:
 
 The intervening boot used ordinary fastboot reboot, with no set-active or
 retry refresh. Byte 0x34 decreased by one; successful/unbootable stayed
-clear for B. This was not the only change: 0x35 XOR0x08 matches the parser's
+clear for B. This was not the only change: 0x35 XOR 0x08 matches the parser's
 fastboot_ok field, and two opaque header offsets also changed. Their
 values remain private and uninterpreted. No direct devinfo write was made.
 The two pairs and these additional changes were posted to the maintainer
-for layout agreement; agreement is still pending. B remains unmarked.
+for layout agreement. The maintainer subsequently confirmed the retry
+and fastboot_ok decoding and approved only B mark-successful, subject to
+the fresh backup and before/after checks described above.
+
+### Approved B-success operation after layout review, 2026-10-22
+
+The maintainer approved only `omamobile-bootctl mark-successful` for B in
+[review 5622088453](https://github.com/derekross/omarchy-mobile/pull/24#pullrequestreview-5622088453).
+A further ordinary B boot used explicit Fastboot serial selection and no
+slot reselection, flash or retry refresh. On the guarded native root, a
+fresh full devinfo backup was saved privately and its checksum matched
+live storage immediately before the write. The unchanged existing tool
+performed the operation under a proven laptop log, watchdog and timed
+read-only restoration.
+
+| Moment | Layout | Bytes 0x30–0x37 |
+| --- | --- | --- |
+| Fresh backup immediately before mark-successful | 3.15 | `02 1a 00 00 00 1c 00 00` |
+| Immediately after mark-successful | 3.15 | `02 1a 00 00 00 1e 00 00` |
+
+All 8192 bytes were compared: only byte 0x35 changed, setting bit 0x02;
+slot A and every other byte stayed unchanged. The devinfo partition and
+its parent were temporarily writable for that tool operation, then
+restored read-only; all original sibling read-only flags and the storage
+guard passed a fresh SSH check. The generic boot-success service remains
+masked. No set-active or other devinfo write was performed.
+
+After graceful return to Fastboot, explicit serial-bound
+`fastboot getvar slot-successful:b` returned **yes** and
+`slot-unbootable:b` returned **no**. A remained successful and bootable.
+This confirms ABL reads the same successful bit the marker writes.
 
 ### GPL source of the G715 cache-hash data
 

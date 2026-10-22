@@ -2,7 +2,7 @@
 # Pixel 9a (tegu): first-light review gates
 
 Status, 2026-10-22: **WIP; firmware equalisation and normal-HCRX/KVM
-control passed; peripheral requalification and layout agreement pending**.
+control passed; B mark-successful layout agreed, peripherals pending**.
 This is a staged review runbook, not an installation guide. Public tegu
 kernel support, shared SOC_COMPATIBLE image tooling and a device package
 are not available from this PR. The descriptor intentionally fails closed.
@@ -69,8 +69,8 @@ preserving the prior backups for comparison.
 ## 1a. Read-only devinfo layout comparison
 
 **Risk:** low for guarded reads; medium for the separately announced boot
-transition. Derek requested this pair on 2026-10-22: record version3.15 and
-only bytes0x30–0x37 alongside ABL’s successful, unbootable and retry-count
+transition. Derek requested this pair on 2026-10-22: record version 3.15 and
+only bytes 0x30–0x37 alongside ABL’s successful, unbootable and retry-count
 getvars for both slots. Keep full captures and backups private. Read the
 bytes before leaving guarded Linux and query ABL before selecting a slot,
 flashing or issuing any other boot-control operation. Record whether ABL
@@ -78,7 +78,7 @@ itself changed anything on entry rather than assuming identical state.
 
 **Expect / pass:** ABL’s values match the predicted byte meanings, then a
 second pair across a firmware-managed slot-state event confirms the change.
-An unmarked B boot should decrement B’s retry byte0x34 by one. A static
+An unmarked B boot should decrement B’s retry byte 0x34 by one. A static
 match alone does not complete this request or authorise a manual write.
 **Stop:** unknown version, ambiguous state transition or contradictory
 flags. **Rollback:** none for reads; use the separately planned boot
@@ -91,8 +91,8 @@ current B prototype. **Completed twice with stock recovery status 0;
 recorded results below.** The maintainer explicitly requested
 the same full OTA sideloaded twice, then selecting A, following PR #23.
 Treat this as the requested stock-maintenance operation, separate from
-ordinary five-image B development; do not ask for the same instruction
-again. It does not authorise individual bootloader/radio/vbmeta/slot-A
+ordinary five-image B development. Done on 2026-10-22 at the
+maintainer's request; repeating it needs a new go. It does not authorise individual bootloader/radio/vbmeta/slot-A
 fastboot writes or use of our devinfo marking tool.
 
 Before execution, pin the exact official full-OTA build for tegu, verify
@@ -208,13 +208,17 @@ that evidence exists.
 ## Recorded control result, 2026-10-22
 
 Both official OTA passes, stock-A build properties, both-slot signed AVB
-flags0 and fresh protected backups pass. Two ordinary installed-B boots
+flags 0 and fresh protected backups pass. Two ordinary installed-B boots
 reach guarded internal root with normal HCRX and all eight CPUs. A real
 ARM64 KVM guest passed on the first control boot. Sources, build identity,
 exact eight-byte layout pairs and remaining qualifications are recorded
 in [NOTES](NOTES.md). This supersedes the pending firmware/control status;
-it does not qualify desktop peripherals on the new firmware or approve
-further devinfo writes. B remains unmarked pending maintainer agreement.
+it does not qualify desktop peripherals on the new firmware. The later
+maintainer-approved B mark-successful operation also passed: a fresh
+backup and full comparison verified only byte 0x35 OR 0x02, the guard was
+restored and ABL confirmed successful=yes. Only this marking operation
+is agreed; no set-active or other devinfo write. See the before/after
+eight-byte record in NOTES.
 
 ## Submission boundaries
 
