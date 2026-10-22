@@ -97,6 +97,7 @@ def service_tests():
     log = os.path.join(work, "log")
     with open(fake, "w") as f:
         f.write("""#!/bin/bash
+[[ $4 == dismiss ]] && sleep 0.1
 printf '%s\\n' "$*" >> "$FAKE_LOG"
 case "$1 $2" in
   "lock isLocked") [[ -n ${FAKE_DOWN:-} ]] && exit 1; echo "${FAKE_LOCKED:-false}" ;;
@@ -155,6 +156,17 @@ esac
         finally:
             open(log, "w").close()
 
+    def wait_dismiss(request_id):
+        # D-Bus replies can arrive before the asynchronous shell process runs.
+        wanted = 'shell call %s dismiss %s' % (pa.PLUGIN, json.dumps({"id": request_id}))
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            with open(log) as f:
+                if wanted in f.read().splitlines():
+                    return True
+            time.sleep(0.01)
+        return False
+
     proc = start()
     try:
         call, _ = ask("t1")
@@ -187,14 +199,14 @@ esac
         took = time.monotonic() - started
         check("no answer times out with an error, not a response",
               call.returncode != 0 and pa.ERROR in err and 1.5 < took < 6, "%s %s %.1fs" % (out, err, took))
-        check("a timed-out sheet is taken back", '"id": "%s"' % request["id"] in logged())
+        check("a timed-out sheet is taken back", wait_dismiss(request["id"]))
 
         call, handle = ask("t5")
         request = wait_request()
         dbus.SessionBus().get_object(pa.BUS_NAME, handle).Close(dbus_interface=pa.REQUEST_IFACE)
         out, err = call.communicate(timeout=10)
         check("the app closing its request ends it with an error", call.returncode != 0 and pa.ERROR in err, out + err)
-        check("a closed request's sheet is taken back", "dismiss" in logged())
+        check("a closed request's sheet is taken back", wait_dismiss(request["id"]))
         check("an unknown id is refused", not answer("0123456789abcdef", "allow"))
     finally:
         stop(proc)
