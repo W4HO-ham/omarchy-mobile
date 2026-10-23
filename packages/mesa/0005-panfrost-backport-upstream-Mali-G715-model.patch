@@ -1,14 +1,35 @@
-Subject: [PATCH] panfrost: backport the upstream Mali-G715 model entry
+From: Erik Faye-Lund <erik.faye-lund@collabora.com>
+Subject: [PATCH] panfrost: backport the upstream Mali-G715 model and rates
 
-Pixel 9a reports GPU_ID 0xb8a21030, seven shaders and core_features 4.
-Mesa 26.2.4 has G715 counter definitions but lacks a matching model
-entry and complete architecture 11 frontend support. This model entry
-is one part of the accompanying v11 backport series.
+Combine the G715 model entry from 73210bf69dfa4cfb5d5c5b3b7c6c91a05209e2b6
+with its corrected rates from b057153fb11d130c5efe665cd0bc04bd1d9be737.
+The model entry alone is insufficient; the accompanying patches provide
+architecture 11 support. Source files retain their MIT license.
 
-Backport the regular G715 entry from upstream Mesa's pan_model.c, including
-its variant 4 and model properties. The G710 entries and sharing fix stay.
-Source: https://gitlab.freedesktop.org/mesa/mesa/-/commit/73210bf69dfa4cfb5d5c5b3b7c6c91a05209e2b6
-License: MIT, matching the source file.
+Backport scope: retain only the G715 row. Omit the G615 row and the
+panfrost.rst/new_features.txt documentation hunks from 73210bf; neither
+is needed for the Pixel 9a. The rate fix is applied only to that retained
+row. No changes to the existing G710, G68 or G78 entries.
+
+Original upstream metadata for 73210bf (model entry):
+  Author: Erik Faye-Lund <erik.faye-lund@collabora.com>
+  Subject: panfrost: enable v11 gpu models
+  Reviewed-by: Lars-Ivar Hesselberg Simonsen <lars-ivar.simonsen@arm.com>
+  Reviewed-by: Daniel Stone <daniels@collabora.com>
+  Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41803>
+
+Original upstream metadata for b057153f (corrected rates):
+  Author: Marc Alcala Prieto <marc.alcalaprieto@arm.com>
+  Subject: panfrost/model: Fix v11 model rates
+  Fixes: 73210bf69df ("panfrost: enable v11 gpu models")
+  Reviewed-by: Jakob Sinclair <jakob.sinclair@arm.com>
+  Acked-by: Lorenzo Rossi <lorenzo.rossi@collabora.com>
+  Acked-by: Erik Faye-Lund <erik.faye-lund@arm.com>
+  Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/44111>
+
+Sources:
+https://gitlab.freedesktop.org/mesa/mesa/-/commit/73210bf69dfa4cfb5d5c5b3b7c6c91a05209e2b6
+https://gitlab.freedesktop.org/mesa/mesa/-/commit/b057153fb11d130c5efe665cd0bc04bd1d9be737
 
 diff --git a/src/panfrost/model/pan_model.c b/src/panfrost/model/pan_model.c
 --- a/src/panfrost/model/pan_model.c
