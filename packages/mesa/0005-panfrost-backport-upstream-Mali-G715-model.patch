@@ -1,0 +1,25 @@
+Subject: [PATCH] panfrost: backport the upstream Mali-G715 model entry
+
+Pixel 9a reports GPU_ID 0xb8a21030, seven shaders and core_features 4.
+Mesa 26.2.4 has G715 counter definitions but lacks a matching model
+entry and complete architecture 11 frontend support. This model entry
+is one part of the accompanying v11 backport series.
+
+Backport the regular G715 entry from upstream Mesa's pan_model.c, including
+its variant 4 and model properties. The G710 entries and sharing fix stay.
+Source: https://gitlab.freedesktop.org/mesa/mesa/-/commit/73210bf69dfa4cfb5d5c5b3b7c6c91a05209e2b6
+License: MIT, matching the source file.
+
+diff --git a/src/panfrost/model/pan_model.c b/src/panfrost/model/pan_model.c
+--- a/src/panfrost/model/pan_model.c
++++ b/src/panfrost/model/pan_model.c
+@@ -99,6 +99,9 @@
+    VALHALL_MODEL(PAN_PROD_ID(10, 12, 4), 4, "G310v5",   "G710", MODEL_ANISO(ALL),  MODEL_TB_SIZES(32768, 16384),
+                                               MODEL_RATES_X(4, 8, 16,  64,  64, 16)),
+ 
++   VALHALL_MODEL(PAN_PROD_ID(11, 8, 2), 4,  "G715",   "G715", MODEL_ANISO(ALL),  MODEL_TB_SIZES(32768, 16384),
++                                              MODEL_RATES_X(4, 8, 32,  64, 128, 16)),
++
+    FIFTHGEN_MODEL(PAN_PROD_ID(12, 8, 0), 4, "G720",  "G720", MODEL_ANISO(ALL),  MODEL_TB_SIZES(65536, 32768),
+                                               MODEL_RATES_X(4, 8, 32,  64, 128, 16)),
+    FIFTHGEN_MODEL(PAN_PROD_ID(13, 8, 0), 4, "G725",  "G725", MODEL_ANISO(ALL),  MODEL_TB_SIZES(65536, 65536),
