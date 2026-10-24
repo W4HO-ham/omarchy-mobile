@@ -45,8 +45,8 @@ to their original diagnostic kernel.
 
 ## Read-only gauge review: temperature deferred, 2026-10-24
 
-[V] Kernel PR38 commit `f08de8b306fb2e5d204d23cc1be7cd94eb55ed8d`
-removes TEMP reporting. Google's GPL driver substitutes 22 C for firmware
+[V] Kernel PR38 driver blob `1e113081a07f0fc629842b31e3fb86b4f7c4fcdf`
+(`drivers/power/supply/max77779_battery.c`) excludes TEMP reporting. Google's GPL driver substitutes 22 C for firmware
 revision 1 with subrevision below 15; this gate does not establish the
 retail gauge firmware revision or a stock-temperature comparison.
 
