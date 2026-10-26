@@ -25,16 +25,19 @@ start, and the codec exposes only `Top/Bottom Speaker Digital Volume` = 220
 (0 dB; 232 is +6 dB), unchanged during a 1 kHz tone at 100 % PipeWire volume.
 Without stock's speaker processing or protection in the path, PipeWire's
 100 % is full scale into stock's amplifier gains, so the WirePlumber rule caps
-the 9a's speaker sink at `channelmix.max-volume = 0.316` (about -10 dB, a
+the 9a's speaker sink at `channelmix.max-volume = 0.562` (a -10 dB ceiling, a
 cautious number, not a measured one) until the speakers' limits are measured
-or a protection path exists. Checked on the phone: with the sink at 100 %
-(`wpctl set-volume @DEFAULT_AUDIO_SINK@ 100%`) `pw-dump` still reports
-`channelVolumes [1.0, 1.0]` (the cap is applied inside the channel mixer, not
-to the reported volume) but the sink carries `channelmix.max-volume = 0.316`,
-and a 440 Hz tone at -20 dBFS played at 100 % and recorded through the 9a's
-own microphone measures -43.6 dBFS RMS with the cap and -24.0 dBFS with the
-line removed and WirePlumber restarted (about 20 dB apart through an
-uncalibrated microphone path; the clamp is in effect). The Pixel 7 Pro's speaker loudness filter is active
+or a protection path exists. PipeWire applies the clamp twice, to the master
+volume and to each channel volume, and the channel mixer multiplies the two,
+so the ceiling is the square of the value: the first cut of this rule used
+0.316 and measured about 20 dB down, not 10. Checked on the phone: with the
+sink at 100 % (`wpctl set-volume @DEFAULT_AUDIO_SINK@ 100%`) `pw-dump` still
+reports `channelVolumes [1.0, 1.0]` (the cap is applied inside the channel
+mixer, not to the reported volume), and a 440 Hz tone at -20 dBFS played at
+100 % and recorded through the 9a's own microphone measured -43.6 dBFS RMS
+at 0.316 and -24.0 dBFS with the line removed and WirePlumber restarted
+(19.6 dB apart through an uncalibrated microphone path); at 0.562 it measures
+-33.3 dBFS RMS, 9.7 dB below uncapped. The Pixel 7 Pro's speaker loudness filter is active
 on the 9a too (`effect_input.omamobile_speaker_loudness` in front of
 `alsa_output.platform-sound-aoc.HiFi__Speaker__sink`); it adds a bass boost
 tuned for amplifiers with protection behind them, so it should be limited to
@@ -50,7 +53,8 @@ overwrite files it does not own): `/usr/share/alsa/ucm2/conf.d/aoc-snd-card/`
 `aoc-snd-card.conf` (b7bf918a…) and `google,tegu-aoc-snd-card.conf`
 (b6033775…), `/usr/share/alsa/ucm2/Google/tegu/HiFi.conf` (a6d460f3…) and
 `/usr/share/wireplumber/wireplumber.conf.d/52-omamobile-tegu-aoc.conf`
-(b909112b…, sha256 prefixes of the committed files). The AoC's own log for the third
+(a8b4e025…, sha256 prefixes of the committed files; the speaker and microphone
+tests above ran before the cap existed, and the cap's own measurement came after). The AoC's own log for the third
 microphone: `Could not enable power for PDM 2`, no fault. Cheetah's list
 `0,3,2` kills the DSP: `FF1 (task=AUD_CAP_PDM): Assertion failed: asp_status
 == ASP_SUCCESS, mic_compensation.cc, 99 [SetPdmMask]`, after which the AoC
