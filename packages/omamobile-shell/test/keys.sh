@@ -57,6 +57,11 @@ cat >"$t/bin/omarchy-hw-display" <<STUB
 #!/bin/bash
 echo ""
 STUB
+# No screensaver on this machine, whatever Omarchy runs here.
+cat >"$t/bin/pgrep" <<STUB
+#!/bin/bash
+exit 1
+STUB
 for tool in omarchy-brightness-display omarchy-system-lock omarchy-shell brightnessctl; do
   cat >"$t/bin/$tool" <<STUB
 #!/bin/bash
@@ -75,8 +80,11 @@ press; grep -q "omarchy-brightness-display on" "$log" || fail "unlocked and dark
 grep -q "omarchy-system-lock" "$log" && fail "unlocked and dark: a press does not lock"
 echo true >"$t/locked"; echo true >"$t/dpms"
 press; grep -q "omarchy-brightness-display off" "$log" || fail "locked and lit: a press turns the screen off"
+grep -q "omarchy-system-lock" "$log" && fail "locked and lit: a press does not lock again"
 echo true >"$t/locked"; echo false >"$t/dpms"
-press; grep -q "omarchy-brightness-display on" "$log" || fail "locked and dark: a press lights the screen"
+press; grep -q "omarchy-shell lock wake" "$log" || fail "locked and dark: a press wakes the lock screen"
+grep -q "omarchy-brightness-display on" "$log" || fail "locked and dark: a press lights the screen"
+grep -q "omarchy-system-lock" "$log" && fail "locked and dark: a press does not lock again"
 # hyprctl failing must read as "screen on": the press locks, never wakes blind.
 cat >"$t/bin/hyprctl" <<STUB
 #!/bin/bash

@@ -3,6 +3,8 @@
 # Phone hardware-key gestures, called by Hyprland binds (hypr/phone.lua), as
 # on Android:
 #   power, short       unlocked: lock and turn the screen off
+#                      unlocked, dark: screen on (nothing locked it, or the
+#                      panel was powered off by hand)
 #                      locked: screen off if it's on, on (PIN pad) if it's off
 #                      screensaver up: lock (it wakes to the PIN pad)
 #   power, held 0.6 s  unlocked: Omarchy's system menu, while still held
@@ -52,8 +54,10 @@ screensaver_up() {
   pgrep -f '[o]rg.omarchy.screensaver' >/dev/null
 }
 
-# Light the locked display like a touch on the lock screen would, so its
-# blank timer runs again (patches/omarchy/0009); plain "on" otherwise.
+# Light the locked display: first the lock's own wake, as a touch on the lock
+# screen would, so its blank timer runs again (patches/omarchy/0009), then the
+# display itself, because on tegu that wake reports ok without powering the
+# panel back on. The brightness is put back if it was saved as 0.
 wake_locked() {
   # The lock's wake restarts its blank timer, but on tegu it reports "ok"
   # without powering the panel back on, so always turn the display on too.
@@ -62,7 +66,8 @@ wake_locked() {
   local device
   device=$(omarchy-hw-display 2>/dev/null)
   sleep 0.3
-  [[ -n $device && $(brightnessctl -d "$device" get 2>/dev/null || echo 1) -gt 0 ]] || brightnessctl -q -d "$device" set 40%
+  [[ -n $device ]] || return 0
+  [[ $(brightnessctl -d "$device" get 2>/dev/null || echo 1) -gt 0 ]] || brightnessctl -q -d "$device" set 40%
 }
 
 # The panel is off when its backlight's bl_power says so (4), or when Hyprland
@@ -131,7 +136,9 @@ short_press() {
     device=$(omarchy-hw-display 2>/dev/null)
     # A saved brightness of 0 would wake to a black panel.
     sleep 0.3
-    [[ -n $device && $(brightnessctl -d "$device" get 2>/dev/null || echo 1) -gt 0 ]] || brightnessctl -q -d "$device" set 40%
+    if [[ -n $device ]]; then
+      [[ $(brightnessctl -d "$device" get 2>/dev/null || echo 1) -gt 0 ]] || brightnessctl -q -d "$device" set 40%
+    fi
   else
     # Dark at once, as on Android, but only by the backlight: Omarchy's lock
     # waits for a working screen ("screen-stabilizing"), so powering the panel
