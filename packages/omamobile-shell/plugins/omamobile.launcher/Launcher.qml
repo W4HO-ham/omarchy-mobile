@@ -225,6 +225,10 @@ Item {
   readonly property int touch: Math.max(44, Style.space(44))
   readonly property int inputHeight: Math.max(48, Style.space(48))
   readonly property int dockHeight: inputHeight + Style.spacing.xxl * 2
+  // No dock under an app: while the focused workspace has a window, the
+  // dock (and its exclusive zone) goes away and the app gets the whole
+  // screen, as on a phone. Home (an empty workspace) brings it back.
+  readonly property bool appOnScreen: !!Hyprland.focusedWorkspace && Hyprland.focusedWorkspace.toplevels.values.length > 0
 
   property real reveal: opened ? 1 : 0
   Behavior on reveal { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
@@ -240,7 +244,7 @@ Item {
 
       // Hidden while the drawer is open, so the on-screen keyboard takes the
       // bottom edge and the drawer's input sits right above it.
-      visible: !root.opened
+      visible: !root.opened && !root.appOnScreen
       anchors { bottom: true; left: true; right: true }
       implicitHeight: root.dockHeight
       exclusionMode: ExclusionMode.Auto
@@ -275,6 +279,58 @@ Item {
           anchors.margins: Style.spacing.xxl
           placeholder: (root.hasAgent ? "Search apps or ask " + root.agentName + "…" : "Search apps…")
           onTapped: root.expand()
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- home indicator
+
+  // Over an app, where the dock is hidden: a thin strip with a pill, as on
+  // iOS. Swipe up on it to go home (the empty workspace, where the dock is
+  // back). It claims no exclusive zone, so the app keeps the whole screen.
+  Variants {
+    model: Quickshell.screens
+
+    PanelWindow {
+      required property var modelData
+      screen: modelData
+
+      visible: root.appOnScreen && !root.opened
+      anchors { bottom: true; left: true; right: true }
+      implicitHeight: 18
+      exclusionMode: ExclusionMode.Ignore
+      color: "transparent"
+      WlrLayershell.namespace: "omamobile-home-indicator"
+      WlrLayershell.layer: WlrLayer.Overlay
+
+      Item {
+        anchors.fill: parent
+
+        Rectangle {
+          anchors.horizontalCenter: parent.horizontalCenter
+          anchors.bottom: parent.bottom
+          anchors.bottomMargin: 5
+          width: 120
+          height: 5
+          radius: height / 2
+          color: Qt.rgba(1, 1, 1, 0.6)
+        }
+
+        DragHandler {
+          target: null
+          xAxis.enabled: false
+          property real swipeY: 0
+          onActiveTranslationChanged: swipeY = activeTranslation.y
+          onActiveChanged: {
+            if (active) { swipeY = 0; return }
+            console.log("omamobile-home-indicator: swipe", Math.round(swipeY))
+            if (swipeY < -24) {
+              // As the switcher's Home: an empty workspace, then the home page.
+              Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ workspace = \"empty\" })"])
+              Quickshell.execDetached(["qs", "ipc", "-p", Quickshell.shellDir, "call", "shell", "call", "omamobile.home", "goHome", ""])
+            }
+          }
         }
       }
     }
