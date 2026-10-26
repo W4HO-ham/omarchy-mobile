@@ -288,21 +288,107 @@ Item {
 
   // Over an app, where the dock is hidden: a thin strip with a pill, as on
   // iOS. Swipe up on it to go home (the empty workspace, where the dock is
-  // back). It claims no exclusive zone, so the app keeps the whole screen.
+  // back); swipe up and hold (or a long swipe) for recent apps, as on
+  // Android. It claims no exclusive zone, so the app keeps the whole screen.
+  //
+  // It sits on the Overlay layer, so it would take touches from anything
+  // below it: it gives way to the on-screen keyboard (squeekboard's bottom
+  // row ends where the strip starts) and to fullscreen windows (video, the
+  // screensaver), and its input mask leaves only the middle of the strip
+  // to the pill.
+  property bool oskOpen: false
+
+  Process {
+    id: oskWatch
+    command: ["omamobile-osk-watch"]
+    running: true
+    stdout: SplitParser {
+      onRead: function(line) {
+        var words = String(line).trim().split(" ")
+        if (words[0] === "visible") root.oskOpen = words[1] === "true"
+      }
+    }
+    onExited: {
+      root.oskOpen = false
+      oskRestart.restart()
+    }
+  }
+
+  Timer {
+    id: oskRestart
+    interval: 3000
+    onTriggered: oskWatch.running = true
+  }
+
+  // A real fullscreen window (mode bit 2; a maximized one reports 1) on the
+  // focused workspace, from the windows' last IPC data. Hyprland's events
+  // arrive before its IPC answer does, so the re-read is debounced and the
+  // value settles a moment later, as Omarchy's notifications do it.
+  property int hyprRevision: 0
+  readonly property bool fullscreenOnScreen: {
+    var revision = hyprRevision
+    var workspace = Hyprland.focusedWorkspace
+    if (!workspace) return false
+    var windows = workspace.toplevels ? workspace.toplevels.values : []
+    for (var i = 0; i < windows.length; i++) {
+      var ipc = windows[i].lastIpcObject || {}
+      if ((Number(ipc.fullscreen) & 2) !== 0) return true
+    }
+    return false
+  }
+
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      switch (event.name) {
+      case "fullscreen": case "openwindow": case "closewindow": case "movewindowv2":
+      case "activewindowv2": case "workspacev2": case "focusedmonv2": case "changefloatingmode":
+        hyprRefresh.restart()
+      }
+    }
+  }
+
+  Timer {
+    id: hyprRefresh
+    interval: 100
+    onTriggered: { Hyprland.refreshToplevels(); hyprSettle.restart() }
+  }
+
+  Timer {
+    id: hyprSettle
+    interval: 250
+    onTriggered: root.hyprRevision++
+  }
+
+  function goHome() {
+    // As the switcher's Home: an empty workspace, then the home page.
+    Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ workspace = \"empty\" })"])
+    Quickshell.execDetached(["qs", "ipc", "-p", Quickshell.shellDir, "call", "shell", "call", "omamobile.home", "goHome", ""])
+  }
+
+  function showRecents() {
+    // Through the CLI, like the dock's swipe: a plugin may only summon
+    // panels it owns, and the switcher is its own plugin.
+    Quickshell.execDetached(["omarchy-shell", "shell", "summon", "omamobile.switcher", "{}"])
+  }
+
   Variants {
     model: Quickshell.screens
 
     PanelWindow {
+      id: indicator
       required property var modelData
       screen: modelData
 
-      visible: root.appOnScreen && !root.opened
+      visible: root.appOnScreen && !root.opened && !root.oskOpen && !root.fullscreenOnScreen
       anchors { bottom: true; left: true; right: true }
       implicitHeight: 18
       exclusionMode: ExclusionMode.Ignore
       color: "transparent"
       WlrLayershell.namespace: "omamobile-home-indicator"
       WlrLayershell.layer: WlrLayer.Overlay
+      // Only the middle of the strip takes touches; the rest passes through.
+      mask: Region { item: hitArea }
 
       Item {
         anchors.fill: parent
@@ -317,18 +403,48 @@ Item {
           color: Qt.rgba(1, 1, 1, 0.6)
         }
 
-        DragHandler {
-          target: null
-          xAxis.enabled: false
-          property real swipeY: 0
-          onActiveTranslationChanged: swipeY = activeTranslation.y
-          onActiveChanged: {
-            if (active) { swipeY = 0; return }
-            console.log("omamobile-home-indicator: swipe", Math.round(swipeY))
-            if (swipeY < -24) {
-              // As the switcher's Home: an empty workspace, then the home page.
-              Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ workspace = \"empty\" })"])
-              Quickshell.execDetached(["qs", "ipc", "-p", Quickshell.shellDir, "call", "shell", "call", "omamobile.home", "goHome", ""])
+        Item {
+          id: hitArea
+          anchors.horizontalCenter: parent.horizontalCenter
+          anchors.top: parent.top
+          anchors.bottom: parent.bottom
+          width: 240
+
+          // Swipe up and let go: home. Swipe up and hold still for a
+          // moment (or swipe far up): recent apps, while the finger is
+          // still down, as Android's gesture navigation does.
+          DragHandler {
+            id: swipe
+            target: null
+            xAxis.enabled: false
+            property real swipeY: 0
+            property bool recents: false
+            onActiveTranslationChanged: {
+              swipeY = activeTranslation.y
+              if (recents) return
+              if (swipeY < -120) {
+                recents = true
+                hold.stop()
+                root.showRecents()
+              } else if (swipeY < -24) {
+                hold.restart()
+              }
+            }
+            onActiveChanged: {
+              if (active) { swipeY = 0; recents = false; return }
+              hold.stop()
+              console.log("omamobile-home-indicator: swipe", Math.round(swipeY), recents ? "recents" : "")
+              if (!recents && swipeY < -24) root.goHome()
+            }
+          }
+
+          Timer {
+            id: hold
+            interval: 350
+            onTriggered: {
+              if (!swipe.active || swipe.recents) return
+              swipe.recents = true
+              root.showRecents()
             }
           }
         }

@@ -52,10 +52,6 @@ screensaver_up() {
   pgrep -f '[o]rg.omarchy.screensaver' >/dev/null
 }
 
-# The panel is off when its backlight's bl_power says so (4), or when Hyprland
-# has the display powered off: on tegu a DPMS-off panel keeps bl_power at 0,
-# and judging by bl_power alone made every Power press lock a dark phone
-# into the dark again instead of waking it.
 # Light the locked display like a touch on the lock screen would, so its
 # blank timer runs again (patches/omarchy/0009); plain "on" otherwise.
 wake_locked() {
@@ -69,6 +65,12 @@ wake_locked() {
   [[ -n $device && $(brightnessctl -d "$device" get 2>/dev/null || echo 1) -gt 0 ]] || brightnessctl -q -d "$device" set 40%
 }
 
+# The panel is off when its backlight's bl_power says so (4), or when Hyprland
+# has the display powered off: on tegu a DPMS-off panel keeps bl_power at 0,
+# and judging by bl_power alone made every Power press lock a dark phone
+# into the dark again instead of waking it. Only a positive "off" counts:
+# if hyprctl or jq fails, the screen reads as on, and the press locks
+# rather than waking a phone that may be lit.
 screen_off() {
   local device
   device=$(omarchy-hw-display 2>/dev/null)
@@ -76,7 +78,7 @@ screen_off() {
      [[ $(</sys/class/backlight/"$device"/bl_power) != 0 ]]; then
     return 0
   fi
-  ! hyprctl monitors -j 2>/dev/null | jq -e 'all(.dpmsStatus)' >/dev/null
+  hyprctl monitors -j 2>/dev/null | jq -e 'any(.[]; .dpmsStatus == false)' >/dev/null
 }
 
 # The chord marker is cleared on power's release, but Hyprland drops that
