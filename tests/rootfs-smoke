@@ -8,6 +8,8 @@
 # unit, the kernel modules, the MANIFEST, and that no per-machine state,
 # per-phone data or Google file is in it.
 set -euo pipefail
+# debugfs and friends live in /sbin on Debian-like hosts
+export PATH=$PATH:/usr/sbin:/sbin
 img=${1:?usage: tests/rootfs-smoke IMAGE[.zst]}
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
@@ -72,6 +74,12 @@ if exists /usr/bin/omamobile-omarchy-patches; then
   grep -q '"result": "ok"' <<<"$patches" || fail "the Omarchy patch series is applied (status.json: $(head -c 300 <<<"$patches"))"
   grep -q 'omamobile-update' <<<"$(cat_ /usr/bin/omarchy-update)" || fail "omarchy update hands over to omamobile-update"
   pass "Omarchy patch series applied, re-patch hook installed"
+fi
+
+# Images from before omamobile-omarchy wrote the lock's PAM file (TOUCH-PLAN 0.1)
+if exists /usr/lib/omamobile-omarchy/lock-pam; then
+  grep -q 'pam_unix.so' <<<"$(cat_ /etc/pam.d/omarchy-lock-password)" || fail "the lock's PAM file is in the image"
+  pass "the lock's PAM file (omarchy-lock-password) is in the image"
 fi
 
 exists /etc/pacman.d/gnupg && fail "no pacman keyring (it holds a private key)"

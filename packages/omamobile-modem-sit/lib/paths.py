@@ -28,10 +28,11 @@ BOOT = os.environ.get('OMAMOBILE_SIT_BOOT', '/dev/umts_boot0')
 
 DEFAULTS = {
     'network': {'apn': '', 'ip_type': 'ipv4v6', 'ims': 'yes', 'ims_apn': 'ims',
+                'ims_required': 'no', 'ims_timeout': '120',
                 'nr': 'off', 'sim_timeout': '120', 'register_timeout': '180'},
     'data': {'route': 'yes', 'metric': '700'},
     'control': {'group': 'wheel'},
-    'audio': {'card': 'auto', 'mic_boost_db': '6'},
+    'audio': {'card': 'none', 'mic_boost_db': '6'},
 }
 
 
