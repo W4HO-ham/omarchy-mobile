@@ -504,6 +504,12 @@ startNmea 25; callbacks location 4, NMEA 5).
   fail (-19)"). It may need a RIL up before it powers the GNSS RF path:
   that ties G3 to the SIT client (cheetah's omamobile-modem-sit) the SIM
   stage needs anyway.
+- **The SIT stack works on the 9a unchanged** (omamobile-modem-sit 0.3.3,
+  plain `omamobile-sitd` without `--bringup`): "SIM: absent; radio: off",
+  GET_RADIO_POWER, GET_PS_REG_STATE and GET_SIM_STATUS all error 0. With
+  sitd up, and after `omamobile-sit radio on` (no SIM: the CP stays in
+  POWER_OFF), Kepler still faulted on engine start; after six faults gnssd
+  gave up ("chppPlatformNotifierWait in STATE_PERMANENT_FAILURE").
 - Next: a stock reference. Boot slot A once with root and capture `logcat
   -b all` and dmesg while an app gets a fix (gnssd, the HAL, CPIF's gnss
   lines, the timemark device it opens), then compare; or decode the fault
