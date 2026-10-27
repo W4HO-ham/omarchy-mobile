@@ -19,9 +19,8 @@ Wi-Fi, audio, sensors and NFC came up as before. Logs:
 question for Linux: the bank is ours, and the modem (pins 0-2), WLAN (3),
 GNSS (4) and Bluetooth (6) consumers request their pins one at a time.
 
-Status, 2026-10-24: offline source and object-build checks pass. No new
-clock or GPIO read, provider enablement, radio power or interrupt claim.
-The pocket requires physical fastboot recovery before further device work.
+Earlier status, 2026-10-24, superseded by FA1 and FA2 above: offline
+source and object-build checks passed, before anything ran on the palmtop.
 
 Source branch `omamobile-tegu-far-alive-source-review-20261024`, worktree
 `out/tegu-far-alive-source-review-20261024/kernel`, maclab VM output

@@ -2,7 +2,7 @@
 # Fingerprint plan (tegu / zumapro): fingerprint unlock on the palmtop
 
 Status (2026-10-27, night): **F0, F2, F6a and F6b passed; F3-F5 and F6c wait for D1.** Earlier: **research and plan only, nothing run on the palmtop for
-fingerprint.** Stage 16 of [ALL-HARDWARE-PLAN](ALL-HARDWARE-PLAN.md). The
+fingerprint.** Stage 16 of ALL-HARDWARE-PLAN (private). The
 Pixel 7 Pro stack works ([cheetah FINGERPRINT-PLAN](../cheetah/FINGERPRINT-PLAN.md),
 opt-in); this plan says what carries over to the Pixel 9a and what is new.
 `[V]` is verified (stock vendor image, stock DT overlays, Google's GPL tree,
@@ -29,7 +29,7 @@ panel driver `panel-gs-tg4c.c` (copy in `~/android/reference/tegu-gpl-panel/`).
 | Supply | S2MPG15 **LDO15S**, 3.3 V fixed, `regulator-always-on` (GPL dtsi `&s_ldo15_reg`; stock calls it `L15S_SPARE`) [V]. No supply on the sensor node [V]. LDO22S is named `L22S_UDFPS` in the PMIC table but has no consumer on tegu: it belongs to the ultrasonic boards of the zuma family (`zuma-board-ultrasonic-udfps.dtsi`) [V source, I for tegu] | GPL `zumapro-tegu-udfps.dtsi`, `zumapro-pmic.dtsi`, `zuma/*udfps*.dtsi` |
 | Touch helper | `google,fps-touch-handler` node; driver `fps_touch_handler.ko` (`CONFIG_FPS_TOUCH_HANDLER=m`, GPL): a generic `input_handler` on any multitouch device that hands touches over the sensor to the HAL through `/dev/fth_fd` (ioctls 101-115, event struct v6) [V] | `fps_touch_handler.{c,h}` |
 | Board revisions | All ten stock `dtbo` entries (board IDs 0x60b01-0x60b06) carry the identical node [V] | `dtbo_a-0..9.dts` |
-| Panel | `tg4c` (`ro.boot.primary_panel_drv=panel-google-tg4c...`, our `probes/panel-tegu-tg4c.c`) [V] | stock getprop, [NOTES](NOTES.md.local-20261026) 2026-10-27 |
+| Panel | `tg4c` (`ro.boot.primary_panel_drv=panel-google-tg4c...`, our `probes/panel-tegu-tg4c.c`) [V] | stock getprop, NOTES (private), 2026-10-27 |
 
 Notes for our kernel: the tegu config already has `CONFIG_GOODIX_FP=m`
 (our platform driver `drivers/misc/goodix-fp.c`, binding

@@ -9,9 +9,8 @@ boot it to **ONLINE** (Gen3 x2) with working IPC (pktproc), no SIM yet;
 G1-G2 passed: gnssd loads Kepler's firmware and talks CHPP over SPI;
 G3 partial: our HAL client starts sessions, but Kepler's core faults at
 engine start. Next: a stock GNSS capture, IOCC, the SIM.
-M0.1 passed. The staged plan (sections F, K, U and
-runbooks M0.2-M6, G1-G4) is written offline below; nothing past M0.1 has
-run. Kernel branches `omamobile-tegu-modem` and `omamobile-tegu-gnssif`
+The staged plan (sections F, K, U and runbooks M0.2-M6, G1-G4) is below,
+with each step's results under it. Kernel branches `omamobile-tegu-modem` and `omamobile-tegu-gnssif`
 (section K).
 
 **The modem is an S5300, not an S5400** [V]: tegu builds Google's
@@ -542,6 +541,21 @@ startNmea 25; callbacks location 4, NMEA 5).
   omamobile-modem 0.1.7 runs gnssd as an optional daemon, so its exit no
   longer stops the profile. Until M6 qualifies the power-off, don't stop the
   modem profile by hand; reboot with someone at the palmtop.
+
+### Suspend with the modem on (2026-10-27, early morning, same kernel)
+
+- **What ran:** s2idle on `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`
+  with the CP ONLINE (CPIF, cbd and rfsd up, no SIM), the bring-up's usual
+  modules loaded (AoC, Wi-Fi, Bluetooth, NFC) and neard polling for tags.
+- **What happened:** the palmtop didn't wake from that sleep. It came back
+  only after Power was held, at 06:44; the journal kept nothing from the
+  sleep itself.
+- **What it was:** later the same morning, with the modem off, a suspend
+  with neard polling reset the palmtop too, and with polling stopped (the
+  `omamobile-tegu-nfc` sleep hook) it sleeps and wakes. NFC polling alone
+  explains the failure, so the modem's part in it is unknown: suspend with
+  the modem on is still unqualified on the 9a (AGENTS.md, "Suspend and
+  modem").
 
 ### M2: the link only (modem link driver, `allow_hw=1`; risk: medium)
 
