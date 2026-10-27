@@ -515,6 +515,31 @@ startNmea 25; callbacks location 4, NMEA 5).
   lines, the timemark device it opens), then compare; or decode the fault
   dump. Then the NMEA FIFO into omamobile-gnss-nmea, as cheetah.
 
+### G3, second try (2026-10-27, night, same kernel plus the fp1 DTB)
+
+- **The SoC identity files are not it.** gnssd reads
+  `/sys/devices/soc0/{machine,revision}` and
+  `/sys/devices/system/chip-id/evt_ver`. `probes/tegu-socinfo.c` registers
+  them with stock's values in the formats of Google's GPL `gs-chipid.c`
+  (machine "ZUMA PRO TEGU MP on ZUMA PRO", revision 16, EVT1.0; fixed, no
+  register read). With them present, every code reload after a fault still
+  ended in the same "KEP M7 HARDFAULT ... LR,PC 600B5B39 0000062C". The
+  `%s/dcxo` path in gnssd is its own store of learned oscillator corrections
+  (`cm_dcxo_corrections.bin`), not an input. Stock's S5910 node has only an
+  off sequence (Google's driver also reads an optional `s5910,on_seq`,
+  which tegu doesn't set), so the AP doesn't switch the RF clock on either.
+  G3 stays blocked on a stock capture.
+- **gnssd's exit took the modem down.** After about ten faults gnssd gives
+  up and exits; the vendor-chroot supervisor then stops the whole modem
+  profile (rfsd too), and the unit's ExecStop runs the CP power-off. On
+  the second try the CP stayed ONLINE (power-off didn't complete); on the
+  first, the profile stopped the same way about 20 s after ONLINE and the
+  palmtop hard-reset with the journal's last 40 s lost, a file written just
+  before it empty. Suspect: the CP power-off path on tegu, untested so far.
+  omamobile-modem 0.1.7 runs gnssd as an optional daemon, so its exit no
+  longer stops the profile. Until M6 qualifies the power-off, don't stop the
+  modem profile by hand; reboot with someone at the palmtop.
+
 ### M2: the link only (modem link driver, `allow_hw=1`; risk: medium)
 
 One step per run, the CPIF overlay not applied, the link overlay applied
