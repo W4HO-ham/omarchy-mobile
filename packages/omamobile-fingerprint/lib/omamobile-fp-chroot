@@ -48,10 +48,12 @@ DEVICE=${OMAMOBILE_FP_DEVICE:-$(fp_device)}
 case $DEVICE in
   cheetah)
     TA=g7.app
-    KEYMINT=/vendor/bin/hw/android.hardware.security.keymint-service.trusty ;;
+    KEYMINT=/vendor/bin/hw/android.hardware.security.keymint-service.trusty
+    PANEL=1440x3120 ;;
   tegu)
     TA=g7a.app
-    KEYMINT=/vendor/bin/hw/android.hardware.security.keymint-service.rust.trusty ;;
+    KEYMINT=/vendor/bin/hw/android.hardware.security.keymint-service.rust.trusty
+    PANEL=1080x2424 ;;
   *) echo "omamobile-fp: unknown device '$DEVICE' (cheetah, tegu)" >&2; exit 1 ;;
 esac
 PROPS_DEVICE=${OMAMOBILE_FP_PROPS_DEVICE:-/usr/lib/omamobile-fp/props-$DEVICE.conf}
@@ -373,7 +375,7 @@ start() {
     spawn bridge vendor /omamobile/omamobile-fp-bridge \
       --socket /dev/socket/omamobile-fp/bridge.sock --touch /dev/input/touchscreen \
       --ui-state /dev/socket/omamobile-fp-ui/state.json \
-      --inhibit /dev/socket/omamobile-fp-ui/inhibit \
+      --inhibit /dev/socket/omamobile-fp-ui/inhibit --panel "$PANEL" \
       ${OMAMOBILE_FP_LHBM_SETTLE_MS:+--settle "$OMAMOBILE_FP_LHBM_SETTLE_MS"}
   fi
 
