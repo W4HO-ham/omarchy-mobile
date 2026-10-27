@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Fingerprint plan (tegu / zumapro): fingerprint unlock on the palmtop
 
-Status (2026-10-27): **research and plan only, nothing run on the palmtop for
+Status (2026-10-27, night): **F0, F2, F6a and F6b passed; F3-F5 and F6c wait for D1.** Earlier: **research and plan only, nothing run on the palmtop for
 fingerprint.** Stage 16 of [ALL-HARDWARE-PLAN](ALL-HARDWARE-PLAN.md). The
 Pixel 7 Pro stack works ([cheetah FINGERPRINT-PLAN](../cheetah/FINGERPRINT-PLAN.md),
 opt-in); this plan says what carries over to the Pixel 9a and what is new.
@@ -388,3 +388,23 @@ needs them.
   60 Hz or with the panel asleep, a 3 s timeout, off on disable, sleep and a
   switch to 60 Hz. On the palmtop at 120 Hz: refused without the opt-in,
   accepted with it, and off again after the timeout. Not yet seen by eye.
+
+## F6a and F6b results (2026-10-27, night, `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`)
+
+- **F6a passed.** DTB round fp1 (DTB only) adds the `goodix,g7-udfps` node
+  to `patches/zumapro-tegu-int-20261026.dtsi`: event line gpa7-6 (EINT,
+  rising), reset gpp1-0 (active low), pin states from Google's GPL
+  `zumapro-tegu-udfps.dtsi` (reset: output, no pull, previous state in
+  power-down), no supply (LDO15S stays on). Booted to the desktop; the
+  bring-up's every step OK; the node exists unbound; touch (gpp1-1) works.
+- **F6b passed.** The tegu integration kernel has no goodix-fp, so the
+  cheetah driver (`drivers/misc/goodix-fp.c` from `omamobile-int`) is built
+  out of tree against it (W=1 clean) and kept at
+  `/var/lib/omamobile-tegu/audio/goodix-fp.ko`, where nothing autoloads it.
+  `insmod`: bound, irq 88 on gpa7-6, both pin states applied, `/dev/goodix_fp`
+  and the `goodix_fingerprint` input device. Opening it (reset pulse) gave
+  **one interrupt**: the sensor is alive on these lines. Further reset
+  pulses gave none, as a sensor that latches its interrupt until the TA
+  reads it over SPI would. Touch, keys and haptics unaffected.
+- F6c (the HAL) needs the TA, which needs secure storage (F4), so it waits
+  for D1 like F3-F5.
