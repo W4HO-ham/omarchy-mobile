@@ -282,6 +282,13 @@ Rollback: none needed.
 - `packages/omamobile-fingerprint/test/all`, `packages/libfprint/test/run`
   pass.
 
+F1 progress (2026-10-27, night): the file list is in
+`tools/extract-fingerprint-vendor -d tegu` and the runner picks the phone
+from the device tree (omamobile-fingerprint 0.1.9, PR #71: g7a.app, the
+Rust KeyMint, `props-tegu.conf` with `ro.hardware=tegu` and platform
+zumapro; g7a.app answers on the same `com.goodix.fingerprint.test` port).
+Still open: the bridge's touch scaling and the 120 Hz request around LHBM.
+
 ### F2: Trusty ports (read-only; risk low)
 
 Connect-and-close to `apploader`, `keymint` (`.keymint`), `gatekeeper` with
