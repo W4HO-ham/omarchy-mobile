@@ -551,11 +551,14 @@ startNmea 25; callbacks location 4, NMEA 5).
   only after Power was held, at 06:44; the journal kept nothing from the
   sleep itself.
 - **What it was:** later the same morning, with the modem off, a suspend
-  with neard polling reset the palmtop too, and with polling stopped (the
-  `omamobile-tegu-nfc` sleep hook) it sleeps and wakes. NFC polling alone
-  explains the failure, so the modem's part in it is unknown: suspend with
-  the modem on is still unqualified on the 9a (AGENTS.md, "Suspend and
-  modem").
+  with neard polling reset the palmtop too. With polling stopped (the
+  `omamobile-tegu-nfc` sleep hook, on the palmtop only for now), 35 s2idle
+  cycles with 20-30 s RTC wakes on 2026-10-27, in three runs of 3, 12 and
+  20 through `systemctl suspend`, all woke. A fourth run's fourth resume
+  lost the UFS link, a separate problem since fixed (kernel PR #83). NFC
+  polling alone explains the failure, so the modem's part in it is
+  unknown: suspend with the modem on is still unqualified on the 9a
+  (AGENTS.md, "Suspend and modem").
 
 ### M2: the link only (modem link driver, `allow_hw=1`; risk: medium)
 
