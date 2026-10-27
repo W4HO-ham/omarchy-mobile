@@ -489,6 +489,14 @@ startNmea 25; callbacks location 4, NMEA 5).
   chroot has. Also unknown: the GNSS RF front end's clock (the S5910
   buffer's outputs; stock has only its off sequence) and whether GNSS_FW
   must be cached and coherent as on stock.
+- Kepler's soft watchdog wrote two 6 MB RAM dumps
+  (`/data/vendor/gps/soft_dog_*_system_ram.bin` in the modem chroot's state,
+  private). Their formatted text has "TEST4 ENB ACQCLK and RF", "TEST2 ENB
+  ACQCLK" and **"Error: FCAL Part 1 is not done yet."**: the RF front end's
+  frequency calibration hasn't finished when the engine starts. persist has
+  no GPS files (read-only copy, 2026-10-27), so its calibration is likely in
+  the modem's NV, which the CP has, or comes from a step stock's HAL or RIL
+  triggers.
 - Next: a stock reference. Boot slot A once with root and capture `logcat
   -b all` and dmesg while an app gets a fix (gnssd, the HAL, CPIF's gnss
   lines, the timemark device it opens), then compare; or decode the fault
