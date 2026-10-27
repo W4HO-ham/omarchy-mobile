@@ -497,6 +497,13 @@ startNmea 25; callbacks location 4, NMEA 5).
   no GPS files (read-only copy, 2026-10-27), so its calibration is likely in
   the modem's NV, which the CP has, or comes from a step stock's HAL or RIL
   triggers.
+- Not the SIT channel itself: with umts_ipc0/1 bound into the chroot,
+  gnssd still never opens them (its SIT traffic goes through RIL,
+  libsitril-gps) and the fault is unchanged. The CP, meanwhile, sends
+  unsolicited SIT messages to umts_ipc0 that nobody reads ("umts_ipc0->recv_skb
+  fail (-19)"). It may need a RIL up before it powers the GNSS RF path:
+  that ties G3 to the SIT client (cheetah's omamobile-modem-sit) the SIM
+  stage needs anyway.
 - Next: a stock reference. Boot slot A once with root and capture `logcat
   -b all` and dmesg while an app gets a fix (gnssd, the HAL, CPIF's gnss
   lines, the timemark device it opens), then compare; or decode the fault
