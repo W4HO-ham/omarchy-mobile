@@ -87,6 +87,18 @@ profile_lists() {
         STUB_LIBS=(libcom.android.tethering.connectivity_native.so)
       fi
       ;;
+    gnss-slsi)
+      # The 9a's GNSS HAL: Samsung's android.hardware.gnss-service, the
+      # client of the modem chroot's gnssd (abstract socket @GNSSND), with
+      # servicemanager and the VINTF manifests that declare IGnss/default.
+      # device/tegu/MODEM-PLAN.md G3.
+      VENDOR_BINS=(bin/hw/android.hardware.gnss-service bin/vndservicemanager)
+      VENDOR_FILES=(etc/gnss/gps.cfg etc/gnss/ca.pem build.prop)
+      VENDOR_DIRS=(etc/vintf)
+      SYSTEM_BINS=(system/bin/servicemanager)
+      SYSTEM_FILES=(system/build.prop)
+      SYSTEM_DIRS=(system/etc/vintf)
+      ;;
     waves)
       VENDOR_BINS=()
       VENDOR_LIBS=(lib64/libmahalcontroller.so lib64/libAlgFx_HiFi3z.so)
@@ -96,7 +108,7 @@ profile_lists() {
       SYSTEM_FILES=(system/build.prop)
       SYSTEM_DIRS=()
       ;;
-    *) die "unknown profile '$1' (known: gnss, modem, waves)" ;;
+    *) die "unknown profile '$1' (known: gnss, gnss-slsi, modem, waves)" ;;
   esac
 }
 
@@ -142,12 +154,12 @@ Usage: extract-vendor-chroot -p PROFILE [-d DEVICE] [-o OUTDIR] [-w WORKDIR] [-f
 
   SOURCE   Google factory zip (DEVICE-*-factory-*.zip) or the
            image-DEVICE-*.zip inside it
-  -p NAME  profile: gnss, modem, waves
+  -p NAME  profile: gnss, gnss-slsi (tegu), modem, waves
   -o DIR   output directory (default: ./out/vendor-chroot-PROFILE)
   -w DIR   scratch directory for vendor.img and system.img, about 2.5 GB
            (default: a temp dir in \$TMPDIR)
-  -d DEV   cheetah (default), raven or tegu (gnss and modem so far:
-           device/raven, device/tegu)
+  -d DEV   cheetah (default), raven (gnss and modem so far) or tegu
+           (gnss-slsi and modem so far)
   -f       skip the device checks
 
 Install on the phone (from the omamobile repo), e.g. for gnss:
@@ -176,7 +188,8 @@ shift $((OPTIND - 1))
 [[ $# -eq 1 && -n $PROFILE ]] || { usage >&2; exit 2; }
 case $DEVICE in
   cheetah) ;;
-  raven|tegu) [[ $PROFILE == gnss || $PROFILE == modem ]] || die "$DEVICE: gnss and modem profiles only so far" ;;
+  raven) [[ $PROFILE == gnss || $PROFILE == modem ]] || die "raven: gnss and modem profiles only so far" ;;
+  tegu) [[ $PROFILE == gnss-slsi || $PROFILE == modem ]] || die "tegu: gnss-slsi and modem profiles only so far" ;;
   *) die "unknown device $DEVICE (cheetah, raven or tegu)" ;;
 esac
 profile_lists "$PROFILE"
