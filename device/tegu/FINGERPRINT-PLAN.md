@@ -287,7 +287,7 @@ F1 progress (2026-10-27, night): the file list is in
 from the device tree (omamobile-fingerprint 0.1.9, PR #71: g7a.app, the
 Rust KeyMint, `props-tegu.conf` with `ro.hardware=tegu` and platform
 zumapro; g7a.app answers on the same `com.goodix.fingerprint.test` port).
-Still open: the bridge's touch scaling and the 120 Hz request around LHBM.
+The bridge scales touches by the touchscreen's axis maxima and takes the panel size (1080x2424) from the runner. Still open: the 120 Hz request around LHBM.
 
 ### F2: Trusty ports (read-only; risk low)
 
