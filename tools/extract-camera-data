@@ -624,7 +624,8 @@ SAMSUNG_PARTS = {
     # after it), its mode records have the IMX712's 1264-byte layout, and
     # each record carries the link's raw10 throughput, which gives the C-PHY
     # rate on its three trios (see samsung_mode_info).
-    "s5kgn8": dict(chip=0x08E8, bayer=1, again=(0x20, 0x200), margin=16,
+    # RGGB [V: the colour bars on the Pixel 9a read red at (0,0), blue at (1,1)]
+    "s5kgn8": dict(chip=0x08E8, bayer=0, again=(0x20, 0x200), margin=16,
                    out="s5kgn8-main.bin",
                    reset=[(0xFCFC, 0x4000), (0x6010, 0x0001)],
                    rec=(1264, 0x148), link_rec=0x150, trios=3),
