@@ -46,6 +46,23 @@ Kernel `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`.
 - **GNSS:** the S2MPG15's three GNSS rails are off at hand-off and stock
   turns them on; they're now described (kernel #101) and on.
 
+### Reserved memory beyond Google's map (kernel #80)
+
+`zumapro-reserved-memory.dtsi` in #80 carries Google's fixed regions from
+`zumapro-rmem.dtsi`, zuma's xhci pools, and three more:
+
+- `abl@f8800000`: predeclared in stock's own factory base DTB as 32 MiB,
+  which ABL shrinks to 16 MiB at hand-off.
+- `0x913a0000` (+0x60000) and `0xfd7ff000` (+0x1000): two ranges the early
+  bring-up kept reserved, next to GXP and the debug tail. They come from the
+  private DRAM map the first boots were built from, not from a public
+  source.
+
+Keeping them reserved is the safe direction. What would free the two gaps
+is stock's live `/proc/iomem` and reserved-memory nodes compared with ours;
+this palmtop can't produce that (stock on slot A stops in recovery with
+Arch on `userdata`), so it needs a second 9a or a reinstall of stock.
+
 ## 2026-10-27: cameras, NFC, USB-C, storage power, fingerprint, drain
 
 Kernel `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty` (the
