@@ -99,9 +99,15 @@ def start_polling(bus):
         if adapter is None:
             continue
         if not adapter.get("Powered"):
-            bus.call_sync(NEARD, path, "org.freedesktop.DBus.Properties", "Set",
-                          GLib.Variant("(ssv)", (ADAPTER, "Powered", GLib.Variant("b", True))),
-                          None, Gio.DBusCallFlags.NONE, -1, None)
+            # This runs from GLib timeouts too: an exception would remove the
+            # timer for good, so a failed power-on is logged and retried.
+            try:
+                bus.call_sync(NEARD, path, "org.freedesktop.DBus.Properties", "Set",
+                              GLib.Variant("(ssv)", (ADAPTER, "Powered", GLib.Variant("b", True))),
+                              None, Gio.DBusCallFlags.NONE, -1, None)
+            except GLib.Error as error:
+                log(f"{path}: Powered=True: {error.message}")
+                return True
         if not adapter.get("Polling") and not screen["lit"]:
             log(f"screen off: {path} powered, polling waits for the screen")
         elif not adapter.get("Polling"):
