@@ -91,7 +91,7 @@ Packages: hyprland 0.56.2-5.1, libcamera 0.7.2-4.16, mesa 1:26.2.4-1.4, omacam 0
 
 ## 2026-10-25: display scale 8/3
 
-On the reference 9a (`7.3.0-rc6` integration kernel, 1080x2424 panel at
+On the reference 9a (`7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`, 1080x2424 panel at
 60 Hz), the owner compared the bring-up's scale 2 (540x1212 logical) with
 8/3 (405x909) on the running desktop, side by side with an iPhone, and kept
 8/3: "about right", about a third larger than 2. Hyprland reported no config
