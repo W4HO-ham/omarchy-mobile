@@ -308,7 +308,9 @@ function batteryFrom(text) {
 // The board from the device tree: "model" and the "compatible" list, read by
 // DEVICE_COMMAND as "<model>\n@@\n<compatible, one per line>".
 var DEVICE_COMMAND = "tr -d '\\0' < /proc/device-tree/model 2>/dev/null; echo; echo '@@'; tr '\\0' '\\n' < /proc/device-tree/compatible 2>/dev/null"
-// What the device tree doesn't say, for the boards Omarchy Mobile runs on.
+// What the device tree doesn't say, for the boards Omarchy Mobile runs on:
+// the panel's size, density and top refresh rate (what it can do, not the
+// rate it runs at now).
 var BOARDS = {
   cheetah: { model: "Pixel 7 Pro", soc: "gs201", display: { width: 1440, height: 3120, hz: 120, dpi: 512 } },
   tegu: { model: "Pixel 9a", soc: "zumapro", display: { width: 1080, height: 2424, hz: 120, dpi: 422 } }
