@@ -10,6 +10,15 @@ for f in bin/omamobile-gnss lib/omamobile-vendor-chroot lib/omamobile-gnss-start
   bash -n "$f" || fail "syntax: $f"
 done
 python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' lib/omamobile-gnss-nmea || fail "python: omamobile-gnss-nmea"
+# The Pixel 9a's path: gnss-slsi from the start script, its FIFO in the bridge and the units.
+grep -c 'gnss-slsi start' lib/omamobile-gnss-start >/dev/null || fail "the 9a starts gnss-slsi"
+grep -c 'OMAMOBILE_GNSS_NMEA_OUT=fifo' lib/omamobile-gnss-start >/dev/null || fail "the 9a's NMEA goes to the FIFO"
+grep -c 'gnss-slsi/data/vendor/gps/nmea_out' lib/omamobile-gnss-nmea >/dev/null || fail "the bridge reads the 9a's FIFO"
+grep -c '^ConditionPathExists=|/usr/lib/omamobile-vendor/gnss-slsi/root$' vendor/systemd/system/omamobile-gnss.service >/dev/null || fail "the service runs with the 9a's image"
+grep -c '^ExecStop=/usr/lib/omamobile-vendor/omamobile-gnss-start --stop$' vendor/systemd/system/omamobile-gnss.service >/dev/null || fail "stop picks the profile"
+grep -c 'gnss-slsi/data/vendor/gps' vendor/systemd/system/omamobile-gnss-nmea.service >/dev/null || fail "the bridge may open the 9a's FIFO"
+# --stop comes before the hang marker, so a leftover marker never skips a stop
+[[ $(grep -n -- '--stop' lib/omamobile-gnss-start | head -1 | cut -d: -f1) -lt $(grep -n 'elif \[\[ -e \$MARK' lib/omamobile-gnss-start | cut -d: -f1) ]] || fail "--stop before the marker"
 # A running stack keeps the phone awake (SUSPEND-PLAN 6.1).
 grep -qx 'ExecStart=/usr/bin/systemd-inhibit --what=sleep --mode=block "--who=Omarchy Mobile GNSS" "--why=A location session is running" /usr/lib/omamobile-vendor/omamobile-gnss-start' \
   vendor/systemd/system/omamobile-gnss.service || fail "the stack holds a sleep inhibitor while it runs"

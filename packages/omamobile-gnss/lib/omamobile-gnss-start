@@ -12,6 +12,13 @@ set -euo pipefail
 MARK=/var/lib/omamobile/gnss-bringup-started
 say() { printf 'omamobile-gnss: %s\n' "$*" >&2; }
 
+# the Pixel 9a (zumapro-tegu) runs the gnss-slsi profile, the Pixel 7 Pro gnss
+tegu() { tr -d '\0' < /proc/device-tree/compatible 2>/dev/null | grep -c 'google,zumapro-tegu' >/dev/null; }
+if [[ ${1:-} == --stop ]]; then
+  if tegu; then profile=gnss-slsi; else profile=gnss; fi
+  exec /usr/lib/omamobile-vendor/omamobile-vendor-chroot "$profile" stop
+fi
+
 if [[ ${1:-} == --retry ]]; then
   rm -f "$MARK"
 elif [[ -e $MARK ]]; then
@@ -19,6 +26,17 @@ elif [[ -e $MARK ]]; then
   exit 0
 fi
 
+# The Pixel 9a's GNSS is the modem's Kepler core: Samsung's gnssd runs in
+# the modem profile, and the gnss-slsi profile runs the HAL and our client,
+# which writes NMEA to the FIFO the bridge reads. Nothing to load here.
+if tegu; then
+  if ! grep -c '@GNSSND' /proc/net/unix >/dev/null; then
+    say "gnssd isn't running (the modem profile with OMAMOBILE_MODEM_GNSS=1); nothing to do"
+    exit 0
+  fi
+  say "starting the 9a's GNSS HAL and client"
+  OMAMOBILE_GNSS_NMEA_OUT=fifo exec /usr/lib/omamobile-vendor/omamobile-vendor-chroot gnss-slsi start
+fi
 # The DT must have the GNSS node enabled (gnss overlay); otherwise nothing to do.
 if ! grep -qs okay /sys/firmware/devicetree/base/soc@0/usi@109400c0/spi@10940000/status; then
   say "SPI5 is not enabled in this device tree; nothing to do"
