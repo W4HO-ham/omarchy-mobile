@@ -91,8 +91,9 @@ Kernel `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`.
 
 Keeping them reserved is the safe direction. What would free the two gaps
 is stock's live `/proc/iomem` and reserved-memory nodes compared with ours;
-this palmtop can't produce that (stock on slot A stops in recovery with
-Arch on `userdata`), so it needs a second 9a or a reinstall of stock.
+this palmtop can't produce that (stock on slot A overwrites `userdata`
+before it reaches recovery: [2026-10-26 and 2026-10-28](#2026-10-26-and-2026-10-28-slot-a-fallbacks-that-cost-userdata)),
+so it needs a second 9a or a reinstall of stock.
 
 ## 2026-10-27: cameras, NFC, USB-C, storage power, fingerprint, drain
 
