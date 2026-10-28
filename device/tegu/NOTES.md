@@ -71,8 +71,9 @@ Kernel `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`.
   Linux-owned images under `/var/lib/omamobile-fp`, not on stock's
   `trusty_userdata` and `trusty_persist` (omarchy-mobile #101;
   FINGERPRINT-PLAN D1 and F4b). The factory
-  calibration lives with Google: the bootloader fetches it by an id from a
-  manufacturing bucket, and the HAL reads the panel's id, likely that key.
+  calibration lives with Google: the bootloader names the file (its
+  `get-cal-url` answer) and it comes from a manufacturing bucket. The panel's
+  id isn't the key (omarchy-mobile #101).
 - **GNSS:** the S2MPG15's three GNSS rails are off at hand-off and stock
   turns them on; they're now described (kernel #101) and on.
 
