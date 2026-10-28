@@ -15,6 +15,9 @@ grep -c 'PANEL_NAME=sdc-s6e3hc4' lib/omamobile-fp-chroot >/dev/null || fail "che
 grep -c 'PANEL_NAME=google-tg4c' lib/omamobile-fp-chroot >/dev/null || fail "tegu's panel name"
 grep -c 'OMAMOBILE_FP_PANEL_NAME' lib/omamobile-fp-chroot >/dev/null || fail "panel name override"
 grep -c 'sdc-s6e3hc4 >' lib/omamobile-fp-chroot >/dev/null && fail "a fixed panel name is written"
+grep -c 'PANEL_NAME=google-tg4c MAP_STORES=1' lib/omamobile-fp-chroot >/dev/null || fail "the 9a maps its stores"
+grep -c 'PANEL_NAME=sdc-s6e3hc4 MAP_STORES=0' lib/omamobile-fp-chroot >/dev/null || fail "the 7 Pro never maps its stores"
+grep -c 'ln -sfn' lib/omamobile-fp-chroot >/dev/null && fail "no forced link over a store"
 grep -c '\[\[ -f \$STATE/td.img \]\] && maps+=(-f 0:/dev/block/ss-td -m /dev/block/ss-td)' lib/omamobile-fp-chroot >/dev/null ||
   fail "TD maps only with its image"
 grep -c '\[\[ -f \$STATE/tdp.img \]\] && maps+=(-f persist/0:/dev/block/ss-tdp)' lib/omamobile-fp-chroot >/dev/null ||

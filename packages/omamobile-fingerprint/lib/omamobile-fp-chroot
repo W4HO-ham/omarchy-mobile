@@ -49,13 +49,14 @@ case $DEVICE in
   cheetah)
     TA=g7.app
     KEYMINT=/vendor/bin/hw/android.hardware.security.keymint-service.trusty
-    PANEL=1440x3120 PANEL_NAME=sdc-s6e3hc4 ;;
+    PANEL=1440x3120 PANEL_NAME=sdc-s6e3hc4 MAP_STORES=0 ;;
   tegu)
     TA=g7a.app
     KEYMINT=/vendor/bin/hw/android.hardware.security.keymint-service.rust.trusty
     # Google's panel_name is the DSI device's name, from the bootloader's
     # "google-tg4c" panel; OMAMOBILE_FP_PANEL_NAME overrides it.
-    PANEL=1080x2424 PANEL_NAME=google-tg4c ;;
+    # the 9a's Trusty stores as block devices (FINGERPRINT-PLAN D1, F4b)
+    PANEL=1080x2424 PANEL_NAME=google-tg4c MAP_STORES=1 ;;
   *) echo "omamobile-fp: unknown device '$DEVICE' (cheetah, tegu)" >&2; exit 1 ;;
 esac
 PANEL_NAME=${OMAMOBILE_FP_PANEL_NAME:-$PANEL_NAME}
@@ -188,14 +189,6 @@ setup_sys() {
   mkdir -p "$sys/class/backlight/panel0-backlight"
   echo 0 > "$sys/class/backlight/panel0-backlight/hbm_mode"
   echo on > "$sys/class/backlight/panel0-backlight/state"
-  # The panel's id, which the HAL reads as the panel serial (Google's
-  # serial_number), when the panel driver exposes it.
-  local sn
-  sn=$(cat /sys/class/backlight/*/device/serial_number 2>/dev/null | head -1 || true)
-  if [[ -n $sn ]]; then
-    mkdir -p "$sys/class/backlight/panel0-backlight/device"
-    printf '%s\n' "$sn" > "$sys/class/backlight/panel0-backlight/device/serial_number"
-  fi
   if [[ -n $bl ]]; then
     bl=$(dirname "$bl")
     bind "$bl/local_hbm_mode" "$sys/class/backlight/panel0-backlight/local_hbm_mode"
@@ -248,7 +241,7 @@ setup_dev() {
   local name img loop
   for name in td tdp; do
     img=$STATE/$name.img
-    [[ -f $img ]] || continue
+    ((MAP_STORES)) && [[ -f $img ]] || continue
     loop=$(losetup -j "$img" | cut -d: -f1 | head -1)
     [[ -n $loop ]] || loop=$(losetup -f --show "$img")
     bind "$loop" "$dev/block/ss-$name"
@@ -257,6 +250,20 @@ setup_dev() {
   mkdir -p "$dev/__omamobile_props__"
   mount -t tmpfs -o mode=0755,nosuid,nodev,noexec props "$dev/__omamobile_props__"
   write_props "$dev/__omamobile_props__"
+}
+
+# Link a store path to its block device. A store already there (a file from
+# an earlier unmapped run, or the 7 Pro's restored copy) is moved aside with
+# a timestamp, never deleted: losing Trusty's state is never a side effect.
+link_store() {
+  local dev=$1 path=$2 aside
+  [[ -L $path && $(readlink "$path") == "$dev" ]] && return 0
+  if [[ -e $path || -L $path ]]; then
+    aside=$path.before-map.$(date +%Y%m%d%H%M%S)
+    mv -- "$path" "$aside" || die "can't move $path aside"
+    say "moved the existing $path to $aside"
+  fi
+  ln -s "$dev" "$path"
 }
 
 setup_data() {
@@ -274,8 +281,10 @@ setup_data() {
   # A mapped store needs its link in place before storageproxyd starts, as
   # on stock: without it storageproxyd answers "pending symlink" and Trusty
   # reads the store as empty.
-  [[ -f $STATE/td.img ]] && ln -sfn /dev/block/ss-td "$STATE/data/vendor/ss/0"
-  [[ -f $STATE/tdp.img ]] && ln -sfn /dev/block/ss-tdp "$STATE/persist-ss/0"
+  if ((MAP_STORES)); then
+    [[ -f $STATE/td.img ]] && link_store /dev/block/ss-td "$STATE/data/vendor/ss/0"
+    [[ -f $STATE/tdp.img ]] && link_store /dev/block/ss-tdp "$STATE/persist-ss/0"
+  fi
   return 0
 }
 
@@ -365,8 +374,10 @@ start() {
   # storageproxyd sets ro.vendor.trusty.storage.fs_ready=1 once Trusty's
   # storage is mounted; trusty_apploader blocks until it runs.
   local maps=()
-  [[ -f $STATE/td.img ]] && maps+=(-f 0:/dev/block/ss-td -m /dev/block/ss-td)
-  [[ -f $STATE/tdp.img ]] && maps+=(-f persist/0:/dev/block/ss-tdp)
+  if ((MAP_STORES)); then
+    [[ -f $STATE/td.img ]] && maps+=(-f 0:/dev/block/ss-td -m /dev/block/ss-td)
+    [[ -f $STATE/tdp.img ]] && maps+=(-f persist/0:/dev/block/ss-tdp)
+  fi
   spawn storageproxyd vendor /vendor/bin/storageproxyd -d /dev/trusty-ipc-dev0 \
     -r /dev/sg-rpmb -p /data/vendor/ss -t ufs "${maps[@]}"
   wait_prop ro.vendor.trusty.storage.fs_ready 1 60 ||
