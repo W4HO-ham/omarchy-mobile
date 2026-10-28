@@ -13,6 +13,53 @@ hash/build ID; this dirty release is not a published kernel package.
 `[V]` marks verified observations; `[I]` marks an inference still to test.
 Raw captures, recordings, backups and vendor files remain off repository.
 
+## 2026-10-28, evening: USB-C host mode through TCPM
+
+Kernel `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty` (the
+integration tree), DTB with the TCPC as a dual-role port.
+
+- **USB-C host mode works end to end** [V]. TCPM runs the port as dual-role
+  (try sink, source PDO 5 V 900 mA), with `vbus-supply` = the MAX77779
+  charger's `chgin-otg` regulator (kernel #124) over the RT9470's OTG boost,
+  and a graph to dwc3's role switch. A USB flash drive attaches as source
+  (SRC_READY), VBUS holds at 5.2 V, the data role goes to host, and the
+  drive enumerates at high speed (`sde: sde1 sde2`). With the drive out and
+  the laptop back: sink, a PD contract, the gadget configured. Again after a
+  fresh boot.
+- **Why VBUS collapsed at first** [V]: the RT9470's JEITA temperature
+  control (0x0c bit 7) was on and read hot (STAT2 0x80), and its I2C
+  watchdog (0x01 bits 1:0) had expired (STAT3 0x20). With either set, the
+  boost reported OTG (ICSTAT 0x0f) while VBUS fell from 5.2 V within ~60 ms,
+  and TCPM retried every second. Google's `rt9471_charger` turns JEITA off
+  on the 9a (`en-jeita` is unset in `zumapro-buck-charge-rt9471.dtsi`) and
+  only runs the watchdog while it kicks it. With both off, VBUS holds under
+  Rd and Rp, with and without AutoDischargeDisconnect. The boost's driver
+  has to clear both.
+- **The eUSB2 side** [V]: the PHY has to come out of reset with the device
+  attached. A drive plugged into a port that's already host isn't seen
+  (the TUSB2E11's attach-detect interrupt never latched). TCPM's flow
+  (attach on CC, then the role switch, then `phy-snps-eusb2` resetting the
+  PHY on the role change) does it in that order.
+- **NFC after s2idle** [V]: the ST54L loses its NCI state across a
+  suspend. The first command after resume gets no I2C ACK (`NFC: Error -6
+  on I2C send`), and every NCI request times out after it. Powering the
+  adapter off and on through neard (a fresh NCI init) brings it back, so
+  the sleep hook has to power the adapter off before the sleep and on
+  after it, not only stop polling.
+- **Fingerprint calibration** [V]: the HAL injects it itself
+  (`injectMtCali`), reading a 112-byte header at offset 0 of
+  `/dev/block/by-name/mfg_data`. The file `fastboot oem udfps get-cal-url`
+  names has exactly that layout (magic `0xca11ca11`, version 1, and the
+  payload length at 0x6c). Written into the chroot's private `mfg_data.img`
+  copy (the partition itself untouched), it's accepted:
+  `vendor.gf.cali.state = 1`, and the "No SA calibration present" line is
+  gone. Enrollment is next.
+- **GNSS** [V]: telling the AoC the GNSS type (`gnss-type = <2>`, as
+  Google's `zumapro-phone-ignss.dtsi`) doesn't change the fault. Kepler
+  loads and goes OPERATIONAL, and the HAL starts a session, but every engine
+  start still ends in "KEP M7 HARDFAULT ... LR,PC 600B5B39 0000062C"
+  (20 in 4 minutes).
+
 ## 2026-10-26: audio (speakers, microphones, A2DP) with omamobile-audio 0.5.0
 
 Kernel `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`: the private
