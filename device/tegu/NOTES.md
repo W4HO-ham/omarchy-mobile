@@ -13,6 +13,39 @@ hash/build ID; this dirty release is not a published kernel package.
 `[V]` marks verified observations; `[I]` marks an inference still to test.
 Raw captures, recordings, backups and vendor files remain off repository.
 
+## 2026-10-28: camera switching, pstore, idle hints, sleep memory rate
+
+Kernel `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`.
+
+- **Camera switching works** (kernel #103). The first capture after a
+  switch away from the ultrawide or front camera came back empty about
+  half the time. The LoCH's EN_STATUS (0x0a8) stays active with the old
+  link in its low bits after a stream that stopped cleanly, and a disabled
+  LoCH ignores the abort, so the next stream on another link got no
+  interrupts. Enabling it for the abort fixes it: nine captures, every
+  switch order, all write frames.
+- **pstore** (kernel #106): ramoops on stock's region survives a watchdog
+  reset on zumapro (the bootloader writes its own log at the start of the
+  console zone).
+- **Core and cluster power-down hints** (the CPU_INFORM register Google's
+  driver writes at every idle entry): powering down cluster 0 stops ACPM
+  answering its DVFS channel, and the palmtop resets (pstore shows it);
+  Google never powers down cluster 0. Clusters 1 and 2 are stable, but
+  neither hint saves anything measurable, screen on or off. Dropped.
+- **Memory rate in s2idle:** with the cable in and charging paused,
+  10-minute RTC-woken freezes drew 371 and 373 mA at MIF 2028 MHz and
+  314 mA at 421 MHz. One later freeze never woke (in s2idle the watchdog
+  is stopped); a hand restart brings it back.
+- **Link errors** on every camera are ERR_WRONG_CONFIG: packets on VC 0
+  with a data type no channel takes (an embedded-data line a frame on the
+  front and ultrawide, about 527 PDAF packets a frame on the main camera).
+- **Fingerprint:** the trusted app's secure storage is up with Trusty's
+  stores mapped as stock maps them (omarchy-mobile #101). The factory
+  calibration lives with Google: the bootloader fetches it by an id from a
+  manufacturing bucket, and the HAL reads the panel's id, likely that key.
+- **GNSS:** the S2MPG15's three GNSS rails are off at hand-off and stock
+  turns them on; they're now described (kernel #101) and on.
+
 ## 2026-10-27: cameras, NFC, USB-C, storage power, fingerprint, drain
 
 Kernel `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty` (the
