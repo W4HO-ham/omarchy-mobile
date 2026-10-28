@@ -230,6 +230,18 @@ setup_dev() {
     install -m 0600 "$STATE/mfg_data.img" /run/omamobile-fp/mfg_data.img
     bind /run/omamobile-fp/mfg_data.img "$dev/block/by-name/mfg_data"
   fi
+  # Trusty's tamper-detect stores as block devices, as stock maps them
+  # (td: trusty_userdata, tdp: trusty_persist), each a loop device of a
+  # Linux-owned image in $STATE: storageproxyd takes its size limit (-m)
+  # only from a block device. Absent images keep the files in /data.
+  local name img loop
+  for name in td tdp; do
+    img=$STATE/$name.img
+    [[ -f $img ]] || continue
+    loop=$(losetup -j "$img" | cut -d: -f1 | head -1)
+    [[ -n $loop ]] || loop=$(losetup -f --show "$img")
+    bind "$loop" "$dev/block/ss-$name"
+  done
   # the target lives in the tmpfs just mounted on dev: create it first
   mkdir -p "$dev/__omamobile_props__"
   mount -t tmpfs -o mode=0755,nosuid,nodev,noexec props "$dev/__omamobile_props__"
@@ -248,6 +260,12 @@ setup_data() {
   # Linux-owned copy; FINGERPRINT-RESEARCH.md section 6 explains why.
   mkdir -p "$ROOT/data/vendor/ss/persist"
   mount --bind "$STATE/persist-ss" "$ROOT/data/vendor/ss/persist"
+  # A mapped store needs its link in place before storageproxyd starts, as
+  # on stock: without it storageproxyd answers "pending symlink" and Trusty
+  # reads the store as empty.
+  [[ -f $STATE/td.img ]] && ln -sfn /dev/block/ss-td "$STATE/data/vendor/ss/0"
+  [[ -f $STATE/tdp.img ]] && ln -sfn /dev/block/ss-tdp "$STATE/persist-ss/0"
+  return 0
 }
 
 # Build the chroot in the current (private) mount namespace.
@@ -335,8 +353,11 @@ start() {
   sleep 1
   # storageproxyd sets ro.vendor.trusty.storage.fs_ready=1 once Trusty's
   # storage is mounted; trusty_apploader blocks until it runs.
+  local maps=()
+  [[ -f $STATE/td.img ]] && maps+=(-f 0:/dev/block/ss-td -m /dev/block/ss-td)
+  [[ -f $STATE/tdp.img ]] && maps+=(-f persist/0:/dev/block/ss-tdp)
   spawn storageproxyd vendor /vendor/bin/storageproxyd -d /dev/trusty-ipc-dev0 \
-    -r /dev/sg-rpmb -p /data/vendor/ss -t ufs
+    -r /dev/sg-rpmb -p /data/vendor/ss -t ufs "${maps[@]}"
   wait_prop ro.vendor.trusty.storage.fs_ready 1 60 ||
     die "storageproxyd did not report fs_ready in 60 s"
   say "secure storage ready"
