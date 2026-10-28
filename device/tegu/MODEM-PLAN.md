@@ -26,7 +26,12 @@ The 9a's GNSS is the modem's own: stock's `cp_shmem` carries a
 over SPI (`gnss@0`, `samsung,gnss-spi`, interrupt on gpa5-4). So GNSS needs
 the modem up, but not a SIM. Following Derek's advice on issue #51, the
 modem comes up for GNSS first, and the SIM (a prepaid physical one on a
-T-Mobile-network MVNO, PIN off, activated on slot A) comes later.
+T-Mobile-network MVNO) comes later. It is activated in another phone or
+through the carrier's web activation, with its PIN turned off there, then
+put in the 9a with the 9a off. Not on slot A: stock there stops in
+recovery with Arch on `userdata` (see the 10-27 correction below), and the
+factory reset it would need wipes the Arch install. The backup check and a
+fresh read-only backup before the first Linux modem session stay as below.
 
 ## Safety
 

@@ -13,6 +13,33 @@ hash/build ID; this dirty release is not a published kernel package.
 `[V]` marks verified observations; `[I]` marks an inference still to test.
 Raw captures, recordings, backups and vendor files remain off repository.
 
+## 2026-10-28: what the device table's claims rest on
+
+Each line is a run on this 9a, on `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`
+unless it says otherwise; the kernel pull request has the details.
+
+- **Display:** the published kernel drives the panel at 60 Hz. 120 Hz runs
+  on the palmtop with kernel #88's two files (DECON timers per panel), in
+  review.
+- **Touch, sleep fix (kernel #82):** 20 s2idle cycles with RTC wakes in a
+  row, no `bad message header`, touch working after each; without it touch
+  broke at the 13th.
+- **Buttons, Power wakes s2idle:** checked by hand on 2026-10-27, Power from
+  a freeze back to the desktop.
+- **Bluetooth, BCM4383 (kernel #94, merged):** `hci_uart` reloaded with that
+  exact `hci_bcm.c`: the controller came up as `hci0` on its REG_ON latch.
+  Pairing (A2DP) ran with the older form of the code.
+- **Charging, status and inhibit (kernel #92):** the driver bound at 0x69;
+  status, and inhibit through `charge_behaviour`, read and set on the
+  palmtop.
+- **Haptics, CS40L26 with VPBR (kernel #95, merged):** binds, loads its
+  firmware with brownout prevention at 3.008 V, plays effects.
+- **Torch, LM3644 (DT in kernel #96):** 25 brightness steps up to 75 mA on
+  the torch LED.
+- **Suspend, Power and RTC wakes:** Power by hand as above; RTC wakes in the
+  #82 run and in the 2026-10-28 sleep tests, where one of four never woke
+  (recorded in the camera switching entry below).
+
 ## 2026-10-28: camera switching, pstore, idle hints, sleep memory rate
 
 Kernel `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`.
@@ -39,8 +66,11 @@ Kernel `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`.
 - **Link errors** on every camera are ERR_WRONG_CONFIG: packets on VC 0
   with a data type no channel takes (an embedded-data line a frame on the
   front and ultrawide, about 527 PDAF packets a frame on the main camera).
-- **Fingerprint:** the trusted app's secure storage is up with Trusty's
-  stores mapped as stock maps them (omarchy-mobile #101). The factory
+- **Fingerprint:** the trusted app's secure storage is up, with Trusty's
+  stores at the paths stock uses (`0`, `persist/0`) but on loop devices of
+  Linux-owned images under `/var/lib/omamobile-fp`, not on stock's
+  `trusty_userdata` and `trusty_persist` (omarchy-mobile #101;
+  FINGERPRINT-PLAN D1 and F4b). The factory
   calibration lives with Google: the bootloader fetches it by an id from a
   manufacturing bucket, and the HAL reads the panel's id, likely that key.
 - **GNSS:** the S2MPG15's three GNSS rails are off at hand-off and stock
