@@ -13,6 +13,63 @@ hash/build ID; this dirty release is not a published kernel package.
 `[V]` marks verified observations; `[I]` marks an inference still to test.
 Raw captures, recordings, backups and vendor files remain off repository.
 
+## 2026-10-27: cameras, NFC, USB-C, storage power, fingerprint, drain
+
+Kernel `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty` (the
+integration tree; the pieces are kernel PRs, linked below) for everything
+here. The 35 s2idle cycles in AGENTS.md's NFC entry ran on this release too.
+
+**Cameras (kernel #63, #103).** `cam -l`:
+
+    1: Internal back camera (/base/soc/usi@108c00c0/i2c@108c0000/camera@56)
+    2: Internal back camera (/base/soc/usi@108900c0/i2c@10890000/camera@1a)
+    3: Internal front camera (/base/soc/usi@108a00c0/i2c@108a0000/camera@1a)
+
+`tools/phone-smoke`: `| cameras | ok | 3 listed by libcamera |`. With the
+ultrawide's test pattern on, LoCH 0 on link 1 (CTL 0x01000200, RESOL
+0x0c001070, 5312 bytes a line, format 4) wrote three 4208x3072 frames
+(48955392 bytes) showing the sensor's eight colour bars, full width and
+height; the solid-colour pattern (R 1023, Gr 0, B 341, Gb 682) reads back as
+BGGR. The main camera (S5KGN8, C-PHY) delivers whole 4000x3000 frames once
+gs201-csis raises the INT domain and the ISP front end's NOC clock while it
+streams. The ultrawide and the front stream at about 29 fps through the
+software ISP. The tested `phy-gs201-mipi-dcphy-rx.c` is #63's (ed3dacc7f958);
+the tested `gs201-csis.c` (acd8d7d0987a) differs from #63's in one comment.
+Open: the first capture after a camera switch is often empty.
+
+**NFC (kernel #100).** The ST54L reads a contactless card through the
+kernel and neard once nxp-nci sends ST's CORE_SET_CONFIG after init: an
+ISO-DEP target on NFC-A, 15 activations in 45 s with the card held, neard
+lists a tag, with no periodic discovery restart. NFC polling costs about
+60 mA, so omamobile-shell 0.2.33 (PR #99 here) stops it with the screen off.
+
+**USB-C.** tcpci_maxim (merged, kernel #97) loads at boot: a PD contract at
+5 V 3 A, replug back within 1 s. Host mode: VBUS comes from the RT9470 on
+USI10 (Google's ext-otg-only use case; USI10 clocks in kernel #102), the
+TCPC sees VBUS, dwc3 goes host, but a flash drive never connects: the
+eUSB2 repeater (hsi2c9 0x3e) doesn't take the host role yet. Plug-in wakes
+s2idle once the TCPC's interrupt is armed.
+
+**Storage power (kernel #99).** UFS idle clock gating: the cores spend
+60-68 % of an idle minute in C2 with the core's latency request left on
+(0 % with the clocks held on), no UFS errors under load.
+
+**Fingerprint.** The sensor's 3.3 V is S2MPG15 LDO15S, off at hand-off
+(kernel #101); with it on the trusted app finds the sensor and the HAL
+reports it at (540, 1769), radius 113. Init still ends without factory
+calibration: `mfg_data` is all zeros on this palmtop and the TA's
+calibration objects don't open (FINGERPRINT-PLAN.md).
+
+**Drain, cable out.** Awake with the screen off: 556 mA before UFS gating,
+409 mA after it at MIF 2028 MHz and 366 mA at 421 MHz (ACPM lowers MIF on
+request); NFC polling about 60 mA of that; Wi-Fi off and the CPUs at their
+lowest changed little. s2idle: about 140 mA over 59 min. MIF stays at the
+bootloader's 2028 MHz until something asks for less.
+
+**Recovery.** A reboot stuck in `device_shutdown` needs Power held about
+30 s, then Power; with a task stuck in D, reboot with `echo b >
+/proc/sysrq-trigger` instead of `systemctl reboot`.
+
 ## 2026-10-26: audio (speakers, microphones, A2DP) with omamobile-audio 0.5.0
 
 Kernel `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`: the private
