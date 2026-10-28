@@ -202,6 +202,10 @@ New for tegu:
   (`dd` from the node found by `PARTNAME`), and `persist` is read from the
   off-phone backup image, not mounted on the palmtop (f2fs: a read-only
   mount can still run recovery). Never add them to `UFS_RW`.
+- `fastboot oem udfps update-cal`, or any other `oem` command that writes,
+  doesn't run without Derek's explicit go and a named exception: it writes
+  `mfg_data`, outside slot B and `userdata`. Every `fastboot oem` step in a
+  runbook pins the serial with `-s`.
 - `sg` stays blacklisted from autoload; the runner loads it and binds only
   the RPMB LUN's node.
 - `gpp1` is shared with the touchscreen reset (`gpp1-1`): the fingerprint pin
@@ -338,7 +342,9 @@ secure-storage state):
 ```sh
 # TD: a fresh, empty 128 MiB store; storageproxyd takes its -m limit from it
 truncate -s 128M /var/lib/omamobile-fp/td.img && chmod 600 /var/lib/omamobile-fp/td.img
-# TDP: the F3 copy of trusty_persist (read-only copy, same size)
+# TDP: the F3 copy of trusty_persist (read-only copy, same size). Before the
+# first mapped run it is persist-ss/0; after it, that path is the link and the
+# copy is persist-ss/0.before-map.<time>.
 install -m 600 /var/lib/omamobile-fp/persist-ss/0 /var/lib/omamobile-fp/tdp.img
 ```
 
@@ -349,7 +355,9 @@ is moved aside with a timestamp, never deleted), and passes `-f 0:...`,
 `-f persist/0:...` and `-m`. Expect "secure storage ready" with "Using
 0x8000000 as max file size". Rollback: stop the runner, `losetup -d` both,
 delete the two images (Trusty's state in them is lost; the RPMB is not
-rolled back).
+rolled back), then remove the two links (`data/vendor/ss/0`,
+`persist-ss/0`) and move any `*.before-map.*` file back to its own name, so
+the next unmapped run doesn't find links to nothing.
 
 ### F5: the TA (risk low)
 
@@ -512,9 +520,8 @@ needs them.
   there mean this palmtop's calibration was never written (or was wiped).
   Next (needs the owner's hands at fastboot, Volume Down + Power: reaching
   fastboot from Linux can fall back to stock on slot A): `fastboot oem udfps
-  status` and `get-cal-url` (read-only), fetch the file, then either feed it
-  to the TA from Linux (no partition write) or let ABL's `update-cal` write
-  `mfg_data`. The URL's `%s` is presumably the device serial, so fetching it
+  status` and `get-cal-url` (read-only), fetch the file, then feed it to the TA from Linux (no partition write;
+  `update-cal` writes `mfg_data` and is under the rule in section 5). The URL's `%s` is presumably the device serial, so fetching it
   sends the serial to Google: the owner's call.
   With the owner's go, the URL with the serial (either case) answers 404,
   so the id is something else, presumably the sensor's own id that ABL
