@@ -49,13 +49,16 @@ case $DEVICE in
   cheetah)
     TA=g7.app
     KEYMINT=/vendor/bin/hw/android.hardware.security.keymint-service.trusty
-    PANEL=1440x3120 ;;
+    PANEL=1440x3120 PANEL_NAME=sdc-s6e3hc4 ;;
   tegu)
     TA=g7a.app
     KEYMINT=/vendor/bin/hw/android.hardware.security.keymint-service.rust.trusty
-    PANEL=1080x2424 ;;
+    # Google's panel_name is the DSI device's name, from the bootloader's
+    # "google-tg4c" panel; OMAMOBILE_FP_PANEL_NAME overrides it.
+    PANEL=1080x2424 PANEL_NAME=google-tg4c ;;
   *) echo "omamobile-fp: unknown device '$DEVICE' (cheetah, tegu)" >&2; exit 1 ;;
 esac
+PANEL_NAME=${OMAMOBILE_FP_PANEL_NAME:-$PANEL_NAME}
 PROPS_DEVICE=${OMAMOBILE_FP_PROPS_DEVICE:-/usr/lib/omamobile-fp/props-$DEVICE.conf}
 STATE=${OMAMOBILE_FP_STATE:-/var/lib/omamobile-fp}
 RUN=/run/omamobile-fp
@@ -177,7 +180,7 @@ setup_sys() {
     [[ -d /sys/module/$m ]] && bind "/sys/module/$m" "$sys/module/$m"
   done
   mkdir -p "$sys/devices/platform/exynos-drm/primary-panel"
-  echo sdc-s6e3hc4 > "$sys/devices/platform/exynos-drm/primary-panel/panel_name"
+  echo "$PANEL_NAME" > "$sys/devices/platform/exynos-drm/primary-panel/panel_name"
   echo 60 > "$sys/devices/platform/exynos-drm/primary-panel/op_hz"
   # The panel driver's backlight device carries local_hbm_mode and
   # local_hbm_max_timeout; expose it under Google's name.
@@ -185,6 +188,14 @@ setup_sys() {
   mkdir -p "$sys/class/backlight/panel0-backlight"
   echo 0 > "$sys/class/backlight/panel0-backlight/hbm_mode"
   echo on > "$sys/class/backlight/panel0-backlight/state"
+  # The panel's id, which the HAL reads as the panel serial (Google's
+  # serial_number), when the panel driver exposes it.
+  local sn
+  sn=$(cat /sys/class/backlight/*/device/serial_number 2>/dev/null | head -1 || true)
+  if [[ -n $sn ]]; then
+    mkdir -p "$sys/class/backlight/panel0-backlight/device"
+    printf '%s\n' "$sn" > "$sys/class/backlight/panel0-backlight/device/serial_number"
+  fi
   if [[ -n $bl ]]; then
     bl=$(dirname "$bl")
     bind "$bl/local_hbm_mode" "$sys/class/backlight/panel0-backlight/local_hbm_mode"
