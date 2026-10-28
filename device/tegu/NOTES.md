@@ -13,6 +13,73 @@ hash/build ID; this dirty release is not a published kernel package.
 `[V]` marks verified observations; `[I]` marks an inference still to test.
 Raw captures, recordings, backups and vendor files remain off repository.
 
+## 2026-10-26 and 2026-10-28: slot A fallbacks that cost userdata
+
+Both times slot B was active but **not marked successful**, so each boot
+used up one ABL retry. After `fastboot --set-active=b` the 9a's ABL gives
+B **three** tries (10-28: retry 3 after the flash, 1 after two boots, from
+the devinfo dumps below). A boot that never reaches the USB host is crashed
+by the initramfs safety net about 65 s in, so a bad image uses up the tries
+within minutes, and ABL then boots stock on slot A.
+
+**2026-10-26.** Kernel `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`.
+Slot B was written by `omamobile flash` (so `--set-active=b`). The failing
+boot was the Google-kernel RAM comparison, which never brought up USB.
+Fastboot (buttons) then showed A selected and B at retry 0. Stock's own
+boot wasn't captured. Afterwards `userdata`'s ext4 and F2FS magics were
+gone, with non-zero data in their place, `e2fsck -fn` failed, and `persist`
+had changed: stock's first stage had written over the start of
+`userdata`. At 16:35 MST the palmtop sat in stock recovery (USB 18d1:4ee7,
+sideload-only adbd: every adb command answered `error: closed`). Nobody
+chose anything in recovery. A fresh read-only backup of efs, efs_backup,
+modem_userdata, persist, modem_a/b, devinfo and metadata was taken
+(off-repo). The root came back by writing the verified 10-25 recovery image
+to `userdata`.
+
+**2026-10-28.** The same kernel, with a new DTB (the TCPC as a dual-role
+port with a link to dwc3's role switch). In the morning, slot B was
+written by `omamobile flash` (a recovery from fastboot), then by `push` for
+each DTB round. The DTB round lost USB on its boot (`push`: "no SSH after
+reboot"), and a few minutes later the palmtop was on stock. adb answered
+`error: closed` again, the same sideload-only adbd as 10-26. The owner
+doesn't remember what the screen showed, and nobody tapped anything.
+Afterwards `userdata` read as non-zero data with no filesystem magic (the
+first 64 KiB looks random), and the root wouldn't mount. Fastboot by the
+buttons, `omamobile flash` of the last good images, the 10-25 recovery
+image streamed to `userdata` and read back against its sha256, then a boot.
+Fresh read-only backup of the same eight partitions, taken before the boot:
+efs, efs_backup, modem_userdata, persist, devinfo and metadata differed
+from the 10-26 backup, modem_a/b didn't. `fastboot getvar slot-*` wasn't
+captured either day, apart from `current-slot: a` on 10-28.
+
+So stock doesn't just stop at a recovery prompt: on both days `userdata`
+was overwritten before anyone could choose anything. Treat a fallback to
+slot A as losing the Linux root.
+
+**Marking B both days** was the approved operation above, `omamobile-bootctl
+mark-successful` for B. The binary was built statically from
+`packages/omamobile-device-cheetah/src/omamobile-bootctl.c` (source sha256
+`89d03460…`, binary `f44936d5…`), driven by a laptop script that:
+
+1. reads a fresh full `devinfo` snapshot and checks its sha256 against live
+   storage right before the write;
+2. runs the tool's dry run, which must plan exactly one byte;
+3. arms a 30 s timed read-only restore, writes, reads back all 8192 bytes
+   against the predicted image, and checks the read-only flags over a fresh
+   SSH login.
+
+The laptop keeps the command log. The 10-28 harness copy differed from the
+10-26 one only in its baseline paths (slot A's bytes are read live).
+
+| Moment | Bytes 0x30–0x37 |
+| --- | --- |
+| 10-26, before | `02 1a 00 00 00 14 00 00` |
+| 10-26, after | `02 1a 00 00 00 16 00 00` |
+| 10-28, before | `02 1a 00 00 01 14 00 00` |
+| 10-28, after | `02 1a 00 00 01 16 00 00` |
+
+Only byte 0x35 changed (bit 0x02), and slot A was untouched.
+
 ## 2026-10-26: audio (speakers, microphones, A2DP) with omamobile-audio 0.5.0
 
 Kernel `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`: the private
