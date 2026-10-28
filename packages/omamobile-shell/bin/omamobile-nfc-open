@@ -102,7 +102,9 @@ def start_polling(bus):
             bus.call_sync(NEARD, path, "org.freedesktop.DBus.Properties", "Set",
                           GLib.Variant("(ssv)", (ADAPTER, "Powered", GLib.Variant("b", True))),
                           None, Gio.DBusCallFlags.NONE, -1, None)
-        if not adapter.get("Polling"):
+        if not adapter.get("Polling") and not screen["lit"]:
+            log(f"screen off: {path} powered, polling waits for the screen")
+        elif not adapter.get("Polling"):
             try:
                 bus.call_sync(NEARD, path, ADAPTER, "StartPollLoop",
                               GLib.Variant("(s)", ("Initiator",)), None,
@@ -150,10 +152,10 @@ rfkill = {"blocked": None}
 screen = {"lit": True, "dark_for": 0}
 
 
-def screen_lit():
+def screen_lit(drm="/sys/class/drm"):
     """True unless every connected display connector reports DPMS off."""
     states = []
-    for path in glob.glob("/sys/class/drm/card*-*"):
+    for path in glob.glob(f"{drm}/card*-*"):
         try:
             with open(f"{path}/status") as f:
                 if f.read().strip() != "connected":
@@ -185,8 +187,10 @@ def stop_polling(bus):
 
 
 def follow_screen(bus):
-    """Every 2 s: stop the poll loop once the screen has been off for a while,
-    start it again when the screen lights (unless NFC is switched off)."""
+    """Every 2 s: once the screen has been off for a while, stop any poll loop
+    (each time, so one that neard, a restart or the sleep hook started while
+    the screen was dark stops too); start it again when the screen lights
+    (unless NFC is switched off)."""
     lit = screen_lit()
     if lit:
         screen["dark_for"] = 0
@@ -197,7 +201,7 @@ def follow_screen(bus):
                 start_polling(bus)
         return True
     screen["dark_for"] += 2
-    if screen["lit"] and screen["dark_for"] >= SCREEN_OFF_SECONDS:
+    if screen["dark_for"] >= SCREEN_OFF_SECONDS:
         screen["lit"] = False
         if not rfkill["blocked"]:
             stop_polling(bus)
@@ -215,9 +219,6 @@ def follow_rfkill(bus):
     elif previous is not None:
         log("NFC switched on: restarting neard")
         restart_neard(bus)
-        if not screen["lit"]:
-            # neard powers the adapter and polls by itself: stop it again
-            GLib.timeout_add_seconds(4, lambda: stop_polling(bus) or False)
     return True
 
 
