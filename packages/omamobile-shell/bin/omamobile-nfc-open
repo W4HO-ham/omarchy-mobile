@@ -86,7 +86,10 @@ def on_interfaces_added(_conn, _sender, _path, _iface, _signal, params, _data):
 
 def start_polling(bus):
     """Power the first adapter and start a poll loop (neard's ConstantPoll
-    keeps it going after each tag)."""
+    keeps it going after each tag). True means "try again": neard isn't
+    answering, has no adapter yet, or refused the power-on."""
+    if rfkill["blocked"]:
+        return False  # switched off meanwhile; the next unblock restarts neard
     try:
         objects = bus.call_sync(NEARD, "/", "org.freedesktop.DBus.ObjectManager",
                                 "GetManagedObjects", None, None,
@@ -155,7 +158,7 @@ def set_powered(bus, powered):
 
 
 rfkill = {"blocked": None}
-screen = {"lit": True, "dark_for": 0}
+screen = {"lit": True, "dark_for": 0, "start": False}
 
 
 def screen_lit(drm="/sys/class/drm"):
@@ -202,9 +205,11 @@ def follow_screen(bus):
         screen["dark_for"] = 0
         if not screen["lit"]:
             screen["lit"] = True
-            if not rfkill["blocked"]:
+            screen["start"] = not rfkill["blocked"]
+            if screen["start"]:
                 log("screen on: polling again")
-                start_polling(bus)
+        if screen["start"]:
+            screen["start"] = start_polling(bus)
         return True
     screen["dark_for"] += 2
     if screen["dark_for"] >= SCREEN_OFF_SECONDS:
