@@ -570,7 +570,7 @@ looks like an entry nobody filled in. Other leads from the logs:
 `aiding_timemark_reader_thread: open() errno:2` (gnssd can't open its
 time-mark device), `TGT_MEMS initInterface: fromBinder() failed` (the HAL's
 sensor service is missing), and `libsighandler.so` not found. Next, attended
-with the modem up: `strace -f` gnssd across one engine start, to see which
+and on the charger, with the modem up: `strace -f` gnssd across one engine start, to see which
 files and devices it opens or fails to open (observation only).
 
 ### Suspend with the modem on (2026-10-27, early morning, same kernel)

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Fingerprint plan (tegu / zumapro): fingerprint unlock on the palmtop
 
-Status (2026-10-29): **works: F0-F10 passed. The enrolled finger matches and other fingers don't, through the HAL and through fprintd, and the lock screen unlocks by fingerprint.** It needs the bridge and runner fixes in #135 and tg4c's LHBM on the panel's normal bands (`lhbm_od=4`). (F4, the first RPMB write, ran on 2026-10-27 under D1 = A.) Earlier: **research and plan only, nothing run on the palmtop for
+Status (2026-10-29): **works on the owner's kernel: F0-F10 passed. The enrolled finger matches and other fingers don't, through the HAL and through fprintd, and the lock screen unlocks by fingerprint.** It runs on `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`, the integration tree, with tg4c's LHBM loaded by hand. That LHBM isn't in the published tree yet: it's open as derekross/linux-omarchy-mobile#126, on the panel's own bands, which need no DSI reads (the reads are derekross/linux-omarchy-mobile#125, used only for the overdrive experiments). It also needs the bridge and runner fixes in #135. (F4, the first RPMB write, ran on 2026-10-27 under D1 = A.) Earlier: **research and plan only, nothing run on the palmtop for
 fingerprint.** Stage 16 of ALL-HARDWARE-PLAN (private). The
 Pixel 7 Pro stack works ([cheetah FINGERPRINT-PLAN](../cheetah/FINGERPRINT-PLAN.md),
 opt-in); this plan says what carries over to the Pixel 9a and what is new.
@@ -589,7 +589,11 @@ needs them.
   panel, which is where Google's tg4c sits after its first-stage
   overdrive) and a fresh enrollment, `omamobile-fp-ctl auth` gave MATCH on
   the first touch twice. A different finger gave NOMATCH.
-- **F10 passed.** fprintd was masked in the install image. Unmasked, it
+- **F10 passed.** fprintd was masked on the palmtop's own root: a link
+  to `/dev/null` from the same batch as the 9a's other bring-up masks
+  (ModemManager, NetworkManager, omamobile-aoc, omamobile-fp), made by the
+  private bring-up root it was installed from. Nothing in this repository
+  masks it. Unmasked, it
   finds the bridge's device, `fprintd-enroll` completes (20 stages), and
   `fprintd-verify` matches. Locked with `omarchy-shell lock lock`, the
   palmtop unlocked with the enrolled finger, and refused a different finger
