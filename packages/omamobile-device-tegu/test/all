@@ -55,7 +55,8 @@ if [[ -f ../../device/tegu/device.conf ]]; then
 fi
 
 # Nothing that must come from the user's own phone or a kernel build
-blobs=$(find . -type f \( -name '*.ko' -o -name '*.bin' -o -name '*.hcd' -o -name '*.img' -o -name '*.wmfw' \))
+# makepkg's pkg/ and src/build/ are not the package (check() runs beside them)
+blobs=$(find . \( -path ./pkg -o -path ./src/build \) -prune -o -type f \( -name '*.ko' -o -name '*.bin' -o -name '*.hcd' -o -name '*.img' -o -name '*.wmfw' \) -print)
 [[ -z $blobs ]] || fail "binaries in the package: $blobs"
 macs=$(grep -rEn '\b([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}\b' --exclude-dir=build . || true)
 [[ -z $macs ]] || fail "a MAC or Bluetooth address in the package: $macs"
