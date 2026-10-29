@@ -28,8 +28,8 @@ source=("git+https://gitlab.freedesktop.org/libfprint/libfprint.git#tag=$_tag"
         0001-add-the-omamobile_udfps-driver.patch
         omamobile-udfps.c)
 sha256sums=('SKIP'
-            'fa0cf06a639cc128fcf048cded822643b6821ce0b230db4771cde3061e7f5cab'
-            '1c7e0007cce1c7dacf803e6e1214b869c110b781d12b2ba33d7a440d05019502')
+            '931c2e1aa2164f704a9d5e629460938d89e33567ac2a340c848b6c109ea6beff'
+            'ea0560ba96bdb9231917d81b3098d84525e6fa57b9a4743d462c6e67dc47548e')
 
 prepare() {
   cd libfprint
