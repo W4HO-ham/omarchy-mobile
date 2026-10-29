@@ -143,6 +143,47 @@ says `enabled`, and the unit does nothing yet (its marker is absent until H5
 arms it). Rollback: put the `*.before-h2` files back, `depmod -a`, and H6's
 removal of the helpers.
 
+**H2b. The PMIC block and the boost's lines (risk low; attended, on the
+charger).** New since the 10-29 review: the RT9470's interrupt and chip
+enable are the MAX77779's SGPIO6 and SGPIO7, and stock services the boost's
+40 s watchdog from that interrupt. #127 now carries the PMIC block on the
+board (`5ada9ab0f`, with its gpa8-0 line pinned as stock's `if_pmic_irq`)
+and the boost reworked to keep the watchdog and kick it from the interrupt
+(`6c5d97e18`); the block's driver is linux-omarchy-mobile#139 (`a6e10f2ba`).
+One boot before H3, with the boost module still blacklisted from H2:
+
+1. Stage the modules built against the running kernel from
+   `logs/tegu-review-20261029/max77779/` (`gpio-max77779.ko` and the new
+   `tegu-rt9471-boost.ko`, W=1 clean) over `updates/gpio/` and
+   `updates/otg/`, keeping the old boost module as `*.before-h2b`, then
+   `depmod -a`.
+2. Push the DTB built from #127 at `5ada9ab0f` (sha256 `c8b3ea8b…`, the
+   same build that answered the node comparison above plus the PMIC node),
+   the way the 10-28 ot7 DTB went on: the kit's `omamobile images` with
+   that DTB as the base and `omamobile push`. Slot B stays marked; the push
+   writes only the `_b` images.
+3. Reboot with kmsg streamed. Expect: `max77779-pmic 24-0066: MAX77779 PMIC
+   revision 0x02` with no "no interrupt line" message, the line in
+   `/proc/interrupts` (`24-0066` on gpa8-0) at a count that stays put, the
+   gadget as before, smoke 19 of 19. Then `modprobe tegu_rt9471_boost` by
+   hand with kmsg streamed. Expect: `JEITA off, watchdog on (0x1)` as stock
+   leaves it, `watchdog serviced from interrupt N`, and the regmap readout
+   of the PMIC (`/sys/kernel/debug/regmap/24-0066/registers`) with SGPIO6
+   now an input with `PU` set and `PD` clear and its DATA high, SGPIO7 an
+   output driving low (CEB asserted). Stop: an interrupt count on gpa8-0
+   or on the SGPIO line that climbs by more than 100 a second (a pull
+   wrong; `rmmod tegu_rt9471_boost` and read the PMIC's `e9`/`ea`), the
+   boost probing without the interrupt, or no SSH 3 minutes after the
+   reboot (forced restart with the laptop attached). Rollback: the previous
+   DTB pushed back and the `*.before-h2b` module restored, `depmod -a`.
+
+Read-only before the step, for the record: the PMIC's registers as the
+driver found them on 10-29 without the node (ID 0x79, revision 0x02, OTP
+0x21; `INTB_MASK` 0xff; `SGPIO_PU` 0x00, `SGPIO_PD` 0x5e; CNFG0-7 `00 04
+05 04 05 00 04 00`: SGPIO6 an input with the OTP pull-down, SGPIO7 off, so
+nothing drives the boost's enable in the current bring-up and the chip runs
+on its own default).
+
 **H3. Boot with the boost module held back (risk low).** Reboot, with kmsg
 streamed to the laptop. Expect: the gadget comes up as before (it ran before
 the TCPC node existed), the charger waits for `otg-boost-supply`, and the
