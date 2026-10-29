@@ -8,7 +8,13 @@ Name=usb0
 
 [Network]
 Address=172.16.42.1/24
-Gateway=172.16.42.2
 DNS=1.1.1.1
 DNS=9.9.9.9
 ConfigureWithoutCarrier=yes
+
+# Prefer Wi-Fi (NetworkManager's metric 600) when it is available. Keep the
+# host's shared connection as a fallback for initial setup over USB.
+[Route]
+Destination=0.0.0.0/0
+Gateway=172.16.42.2
+Metric=2048
