@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: MIT
 # The sleep hooks in a scratch root with fake lsmod, modprobe, rmmod,
 # systemctl, logger and busctl: Wi-Fi is left alone when kept and present,
-# unloaded and reloaded otherwise, and falls back after a lost sleep; NFC is
-# stopped and powered off before the sleep and brought back after it.
+# unloaded and reloaded otherwise, and falls back after a lost sleep; NFC's
+# poll loop is stopped before the sleep and started again after it, and the
+# adapter is powered off only behind the flag file.
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 wifi=$PWD/vendor/systemd/system-sleep/omamobile-tegu-wifi
@@ -33,7 +34,8 @@ case $1 in
         [[ $5 == StopPollLoop ]] && rm -f "$TEST_NFC/Polling"
         [[ $5 == StartPollLoop ]] && : > "$TEST_NFC/Polling" ;;
   set-property) echo "busctl set $5 $7" >> "$TEST_LOG"
-        [[ $7 == true ]] && : > "$TEST_NFC/Powered" || rm -f "$TEST_NFC/Powered" ;;
+        [[ $7 == true ]] && : > "$TEST_NFC/Powered" || rm -f "$TEST_NFC/Powered"
+        [[ $7 == true ]] || rm -f "$TEST_NFC/Polling" ;;
 esac
 exit 0
 EOF
@@ -41,6 +43,8 @@ chmod +x "$tmp/bin/"*
 calls() { tr '\n' ';' < "$TEST_LOG" | sed 's/;$//'; }
 run=$OMAMOBILE_TEGU_ROOT/run/omamobile
 keep=$OMAMOBILE_TEGU_ROOT/etc/omamobile/wifi-keep-across-sleep
+power_off=$OMAMOBILE_TEGU_ROOT/etc/omamobile/nfc-power-off-across-sleep
+nfc_log=$OMAMOBILE_TEGU_ROOT/var/log/omamobile/nfc-sleep.log
 iface() { mkdir -p "$OMAMOBILE_TEGU_ROOT/sys/bus/pci/drivers/brcmfmac/0000:01:00.0" "$OMAMOBILE_TEGU_ROOT/sys/class/ieee80211/phy0"; }
 no_iface() { rm -rf "$OMAMOBILE_TEGU_ROOT/sys"; }
 
@@ -73,18 +77,37 @@ no_iface() { rm -rf "$OMAMOBILE_TEGU_ROOT/sys"; }
 "$wifi" pre
 [[ $(calls) == "systemctl stop iwd;rmmod brcmfmac_wcc brcmfmac" ]] || fail "the fallback flag is not honoured: $(calls)"
 
-# NFC powered and polling: stopped and powered off before, back after
-: > "$TEST_LOG"; : > "$TEST_NFC/Polling"; : > "$TEST_NFC/Powered"
+# NFC powered and polling, no flag file: the poll loop is stopped before and
+# started again after; the adapter stays powered; both readings are logged
+: > "$TEST_LOG"; rm -f "$power_off" "$nfc_log"; : > "$TEST_NFC/Polling"; : > "$TEST_NFC/Powered"
 "$nfc" pre
-[[ $(calls) == "busctl call StopPollLoop;busctl set Powered false" ]] || fail "NFC pre: $(calls)"
-[[ -e $run/nfc-was-polling && -e $run/nfc-was-powered ]] || fail "NFC pre left no notes"
+[[ $(calls) == "busctl call StopPollLoop" ]] || fail "NFC pre: $(calls)"
+[[ -e $run/nfc-was-polling && ! -e $run/nfc-was-powered ]] || fail "NFC pre notes: polling only"
+[[ -e $TEST_NFC/Powered ]] || fail "NFC pre powered the adapter off without the flag"
 "$nfc" post
-[[ $(calls) == "busctl call StopPollLoop;busctl set Powered false;busctl set Powered true;busctl call StartPollLoop" ]] || fail "NFC post: $(calls)"
+[[ $(calls) == "busctl call StopPollLoop;busctl call StartPollLoop" ]] || fail "NFC post: $(calls)"
 [[ ! -e $run/nfc-was-polling && ! -e $run/nfc-was-powered ]] || fail "NFC post left its notes"
-grep -q '^.* pre: polling=b false powered=b false$' "$OMAMOBILE_TEGU_ROOT/var/log/omamobile/nfc-sleep.log" || fail "NFC pre is not logged"
+grep -q ' pre: polling=b false powered=b true$' "$nfc_log" || fail "NFC pre is not logged: $(cat "$nfc_log")"
+grep -q ' post: polling=b true powered=b true$' "$nfc_log" || fail "NFC post is not logged: $(cat "$nfc_log")"
+
+# Powered but not polling: nothing to stop, nothing to restart, still logged
+: > "$TEST_LOG"; rm -f "$nfc_log" "$TEST_NFC/Polling"
+"$nfc" pre; "$nfc" post
+[[ -z $(calls) ]] || fail "an idle NFC adapter was touched: $(calls)"
+grep -q ' pre: polling=b false powered=b true$' "$nfc_log" || fail "an idle adapter is not logged"
+
+# With the flag file: stopped and powered off before, powered on and polling after
+: > "$TEST_LOG"; : > "$power_off"; : > "$TEST_NFC/Polling"
+"$nfc" pre
+[[ $(calls) == "busctl call StopPollLoop;busctl set Powered false" ]] || fail "NFC pre with the flag: $(calls)"
+[[ -e $run/nfc-was-polling && -e $run/nfc-was-powered ]] || fail "NFC pre with the flag left no notes"
+"$nfc" post
+[[ $(calls) == "busctl call StopPollLoop;busctl set Powered false;busctl set Powered true;busctl call StartPollLoop" ]] || fail "NFC post with the flag: $(calls)"
+[[ -e $TEST_NFC/Powered && -e $TEST_NFC/Polling ]] || fail "NFC post with the flag did not bring the adapter back"
+rm -f "$power_off"
 
 # NFC off (no neard): nothing is called
 : > "$TEST_LOG"; rm -f "$TEST_NFC"/*
 "$nfc" pre; "$nfc" post
 [[ -z $(calls) ]] || fail "an off NFC adapter was touched: $(calls)"
-echo 'ok - sleep-hooks: Wi-Fi kept or reloaded as flagged, NFC stopped and restored'
+echo 'ok - sleep-hooks: Wi-Fi kept or reloaded as flagged, NFC polling stopped and restored, power-off behind the flag'
