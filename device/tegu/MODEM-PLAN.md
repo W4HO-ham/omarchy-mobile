@@ -743,6 +743,68 @@ The next step is the clock itself, in the kernel: let spi-s3c64xx reach 12.5 MHz
 
 **The CP link hang, read from the source (offline):** our `tegu-pcie0-cp` guards DBI and configuration space while the PHY is isolated (accesses return 0 or are dropped), but not the CP's BAR window, which CPIF uses for its doorbell. CPIF's main doorbell path (`link_device.c`) looks safe: it rings under `pcie_tx_lock` after checking that `pcie_onoff_lock` is free and `pcie_powered_on` is set, and `s5100_poweroff_pcie()` takes `pcie_onoff_lock` first and then waits for `pcie_tx_lock` before it powers the link down, so a doorbell either finishes before the power-off or is reserved for later. `IOCTL_LOAD_GNSS_IMAGE` only copies into the GNSS_FW carve-out in AP memory (no link access); the reloads matter because the Kepler reset around them makes IPC traffic, so the link wakes and idles twice a second. I found no unguarded BAR access by reading; the other doorbell callers (`modem_ctrl_s5100.c`) are the CP boot and the power-on path. The step that would find it is below, gated; it has not run, and GNSS is parked (see "Parked" under the morning of 10-29), so it runs only if GNSS is ever resumed.
 
+**What the kept consoles say (2026-10-29, read offline from `/var/log/omamobile/ramoops/`,
+the 24 boots between 07:34 and 09:19 local; the extracts are in `logs/tegu-review-20261029/hangs/`,
+not committed).** Each saved console holds the bootloader's log of the boot
+that wrote it, the kernel's console, then the next boot's bootloader log,
+whose `[PRE] RST_STAT` names the reset. The morning's resets sort into
+three kinds:
+
+- `SYSTEM_SWRESET_SYSTEM` after `sysrq: Resetting` with a `---[ end trace ]---`
+  just before (eight boots): the curated start's fault check tripping on the
+  `OF: overlay` WARNING and resetting, as item 7 of the morning list says;
+- `SYSTEM_SWRESET_SYSTEM` after `reboot: Restarting system with command
+  'bootloader'` (two) or `'omamobile'` (six): the 150 s dead-man and the
+  pushes;
+- `CLUSTER0_NONCPU_WDTRESET` (seven, at 07:37, 07:42, 07:48, 07:51, 08:45,
+  08:52, 08:56, 09:09): the real hangs. Every one of them ends the same way.
+  The last line is the pair `samsung-pinctrl 154e0000.pinctrl: wake disabled
+  for irq N` / `wake enabled for irq N` (N = the `cp2ap_wakeup` line on
+  FAR_ALIVE, 85, 84, 70, 76 or 96 depending on the boot), which is CPIF's
+  `ap_wakeup_handler()` flipping the line's trigger after an edge; what
+  should follow 5 ms later, `tegu-pcie0-cp: PHY out of isolation`, never
+  comes. Before it the link was cycling once every half second: `PHY out
+  of isolation`, `link up: Gen3 x2`, 55 ms, the toggle (the CP releasing
+  the line), `PHY isolated`, 350 ms, the toggle (the line asserted again),
+  and so on, eight to twenty toggles in the last minute. One console (07:42)
+  caught the hang's shape: an `rcu_preempt detected stalls` report with
+  CPUs 0, 3 and 7 stuck (`idle=...1/0x4000000000000002`, 5255 jiffies,
+  detected by CPU 4) 22 s after the modem went ONLINE, i.e. right when
+  gnssd starts (`OMAMOBILE_MODEM_GNSS_DELAY` is 20 s), with no backtrace,
+  which is what a load that never completes looks like. Another (07:48)
+  has, as its last lines before the toggle, gnssd's `lal_state_thread`
+  opening `gnss_dump` and `gnss_boot` and CPIF answering `pcie_send_ap2cp_irq:
+  Reserve doorbell interrupt: PCI not powered on`: an AP-to-CP interrupt
+  asked for while the link was down, which CPIF parks and answers with
+  `s5100_try_gpio_cp_wakeup()`.
+
+  So the hang falls in the window after the CP (or the AP's own wake
+  request) asserts `cp2ap_wakeup` and before the link is back, and it
+  happens only while something cycles the link quickly: the old watcher's
+  open/close (the 07:37-07:51 boots, before omamobile-modem 0.1.9) or
+  gnssd's Kepler loads (the later ones). In that window the paths that run
+  are CPIF's `cp2ap_wakeup_work()` to `s5100_poweron_pcie()` and our
+  `gs201_pcie_cp_poweron()`, whose first hardware step is the PMU bypass
+  write that logs `PHY out of isolation`; nothing before that line touches
+  the PCIe block. A load that hangs the CPU therefore comes from another
+  thread in that window: a read of the modem's BAR window while the PHY is
+  isolated, as the cheetah gotcha describes, from a path that doesn't take
+  the link first. The GNSS image itself goes to DRAM (`SHMEM_GNSS_FW` through
+  `gnss_v_base`), so the candidates are the IPC paths that follow it:
+  `pcie_read_thread` on the shared-memory queues, `s51xx_pcie_restore_state()`
+  and the MSI set-up on the way back up, and CPIF's own status reads.
+
+  Two things follow for G3-L1. First, a cheaper step before the trace: a
+  cpif module parameter that makes `s5100_poweroff_pcie()` keep the link
+  up (Google's own "Skip pci power off" path, taken unconditionally), on a
+  bring-up branch, then three 12-second sessions. If the hang goes away
+  with the link held, the cause is a link-down access and the trace knows
+  where to look; if it stays, the link is not it. Second, the trace points:
+  `s5100_poweron_pcie()` entry and `gs201_pcie_cp_poweron()` entry (to see
+  whether the power-on path is ever entered before the hang), and every
+  `readl` of the BAR window in CPIF (the `s51xx_*` helpers and
+  `pcie_read_thread`'s queue reads) with `pcie_powered_on` in the line.
+
 **G3-L1: which BAR access lands after isolation (attended, on the charger; risk: medium-high).** A trace at each BAR access in CPIF and at `cp_phy_isolate()` (the caller, the lock state and `pcie_powered_on` in the kernel log), to see which access lands after isolation. The tracing change goes on a kernel branch first (`omamobile-tegu-modem`, or a bring-up branch on the fork, linked by commit), is built there and reaches slot B through `bin/omamobile push`; nothing is patched on the palmtop by hand, and the kernel never boots before the branch is pushed. Before the step: M0.1's partition check, the kmsg stream to the laptop with `--watchdog`, the palmtop on the charger with someone at it the whole time, and a 12-second GNSS session (as the morning's) to bring on Kepler's watchdog resets and the link cycling. Expect: the log names the access that follows `cp_phy_isolate()`, or the link cycles through Kepler's resets without a hang. Stop: two SoC resets (a hang with no record in pstore counts as one), or any `ufshcd_err_handler` line in dmesg, or an NV partition that reads `ro=0` or mounted; after a stop, no further boot of the tracing kernel that day. Cap: two resets per session and three sessions in all, then the step is closed and the hang waits for a stock capture. Rollback: `bin/omamobile push` of the previous images (the gn3 kernel), then M0.1 again, as after any reset with the modem up. Risk: medium-high, because each reset is a hang with the modem up, which has been followed by a recovered UFS error-handler pass on cheetah; the partition check afterwards is not optional.
 
 ### G3, the morning of 10-29: the clock fixed, the cut fixed, and what is left (thirty-fifth to forty-fourth tries)
