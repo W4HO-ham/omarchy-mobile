@@ -28,8 +28,10 @@ integration tree), DTB with the TCPC as a dual-role port.
   fresh boot. Two parts of that setup aren't in a public tree yet: the DT
   fragment (the TCPC as dual-role with `vbus-supply`, the graph to dwc3) and
   the RT9470 bring-up module that writes OTG_EN, JEITA_EN and the watchdog
-  bits. They are on the kernel bring-up branch derekross/linux-omarchy-mobile#127, with the plan and runbook in #136. This supersedes
-  #100's "the eUSB2 repeater doesn't take the host role yet".
+  bits. They are on the kernel bring-up branch
+  derekross/linux-omarchy-mobile#127, with the plan and runbook in #136.
+  This supersedes #100's "the eUSB2 repeater doesn't take the host role
+  yet".
 - **How the cable swaps were covered** [V]: attended, with W4HO at the
   palmtop for every swap. Taking the laptop out cuts the only link, so each
   sampling script carried its own dead-man: with no USB gadget configured 6
@@ -70,7 +72,9 @@ integration tree), DTB with the TCPC as a dual-role port.
   on I2C send`), and every NCI request times out after it. Powering the
   adapter off and on through neard (a fresh NCI init) brings it back, so
   the sleep hook has to power the adapter off before the sleep and on
-  after it, not only stop polling.
+  after it, not only stop polling (10-29: not needed with
+  https://github.com/derekross/linux-omarchy-mobile/pull/131, and a
+  power-off hook failed to wake once; see #137).
 - **Fingerprint calibration** [V]: the HAL injects it itself
   (`injectMtCali`), reading a 112-byte header at offset 0 of
   `/dev/block/by-name/mfg_data`. The file `fastboot oem udfps get-cal-url`
@@ -79,7 +83,7 @@ integration tree), DTB with the TCPC as a dual-role port.
   copy (the partition itself untouched), it's accepted:
   `vendor.gf.cali.state = 1`, and the "No SA calibration present" line is
   gone. Later that evening enrollment completed, but matching doesn't work
-  yet (#135).
+  yet (#135; 10-29: it does now, see FINGERPRINT-PLAN F9/F10 in #138).
 - **GNSS** [V]: telling the AoC the GNSS type (`gnss-type = <2>`, as
   Google's `zumapro-phone-ignss.dtsi`) doesn't change the fault. Kepler
   loads and goes OPERATIONAL, and the HAL starts a session, but every engine
