@@ -1,26 +1,129 @@
 <!-- SPDX-License-Identifier: MIT -->
-# Pixel 9a device policy
+# omamobile-device-tegu
 
-Experimental tegu support: the unchanged storage guard's udev policy, USB
-networking and the device descriptor. The package does not start firmware,
-radio, audio, charging, fingerprint or other unqualified hardware services.
-It contains no vendor files or per-phone data.
+Omarchy Mobile's system support for the Google Pixel 9a (codename tegu,
+Tensor G4 / zumapro). It sits beside Omarchy's own packages the way
+`omarchy-mac` adds Apple Silicon support, and does for the 9a what
+`omamobile-device-cheetah` does for the Pixel 7 Pro, with one difference:
+the 9a's kernel is still being upstreamed, so part of its bring-up cannot be
+packaged yet. What is here is what runs on in-tree drivers.
 
-The CS40L26 feedbackd rule is reused unchanged from the Pixel7 Pro package.
-It identifies an already registered force-feedback input and grants desktop
-access; it does not load the driver, power hardware or send a vibration.
+| Path | Installs to | What it does |
+| --- | --- | --- |
+| `bin/omamobile-tegu-graphics-start` + `vendor/systemd/system/omamobile-tegu-graphics.service` + `display-manager.service.d/10-omamobile-tegu.conf` | `/usr/bin`, `/usr/lib/systemd/system` (enabled by a vendor wants link) | Loads the GPU (panthor), the display controller (gs_decon), haptics (cs40l26_vibra), the torch (leds_lm3644), the battery gauge (max77779_battery) and the Bluetooth controller (hci_uart) at boot, in that order, after writing and syncing a marker. A boot that hangs in one of them leaves the marker, and the next boot keeps all six off and says so; `omamobile-tegu-graphics-start --retry` tries again. The display manager waits for it |
+| `vendor/modprobe.d/omamobile-tegu-guards.conf` | `/usr/lib/modprobe.d` | Keeps those drivers (and the Wi-Fi, PCIe and NFC ones, for the day they are in tree) from autoloading ahead of the guard. No `install` lines: they would break the guard's own modprobe |
+| `vendor/modprobe.d/omamobile-tegu-display.conf`, `omamobile-tegu-clk-acpm.conf` | `/usr/lib/modprobe.d` | DSI commands for brightness and sleep, 120 Hz, the panel really off on DPMS; the GPU DVFS ceiling at 890 MHz |
+| `bin/omamobile-tegu-aoc-start` + `vendor/systemd/system/omamobile-tegu-aoc.service` + `vendor/modprobe.d/omamobile-tegu-aoc.conf` | `/usr/bin`, `/usr/lib/systemd/system` (not enabled), `/usr/lib/modprobe.d` | Boots the AoC (audio and sensor DSP) hang-safe: Trusty, the GSA, the AoC drivers, `aoc-tegu.bin`, then waits for its 93 services. Ships disabled: see below |
+| `bin/omamobile-bt-addr` + `vendor/systemd/system/omamobile-bt-addr@.service` + `vendor/udev/rules.d/80-omamobile-bt-addr.rules` | `/usr/bin`, `/usr/lib/systemd/system`, `/usr/lib/udev/rules.d` | Gives the BCM4383 its real Bluetooth address from the bootloader's device tree when the controller appears, powering it on once first (set on a never-powered controller, the kernel withdraws the index for good). The Pixel 7 Pro's script, with the extra waits the 9a needed |
+| `bin/omamobile-tegu-usb-rescue` + `src/tegu-tcpc-switch.c` + `vendor/systemd/system/omamobile-tegu-usb-rescue.service` | `/usr/bin`, `/usr/lib/systemd/system` (enabled by a vendor wants link) | Closes the MAX77779's USB data switch after a cable replug while no Type-C driver owns the chip; with one loaded it exits. The helper reads the chip's identity and VBUS before its one write and never forces an address a driver holds |
+| `bin/omamobile-tegu-charge-limit` + `vendor/udev/rules.d/75-omamobile-tegu-charger.rules` | `/usr/bin`, `/usr/lib/udev/rules.d` | Applies `/etc/omamobile/charge-limit` (a percentage, say `80`) to the charger when it appears; charging stops there and starts again 5 below. No file: charge to 100 % |
+| `vendor/systemd/system-sleep/omamobile-tegu-wifi` | `/usr/lib/systemd/system-sleep` | Keeps Wi-Fi loaded across s2idle when `/etc/omamobile/wifi-keep-across-sleep` exists (the chip reloads its firmware on resume and iwd reconnects), otherwise unloads and reloads brcmfmac around the sleep; after a sleep that lost Wi-Fi it unloads for the rest of the boot |
+| `vendor/systemd/system-sleep/omamobile-tegu-nfc` | `/usr/lib/systemd/system-sleep` | Stops neard's poll loop and powers the ST54L off before a sleep (it does not answer on I2C after a wake otherwise), and brings it back afterwards |
+| `vendor/systemd/system/linux-modules-cleanup.service.d/10-omamobile-tegu.conf` | `/usr/lib/systemd/system` | Holds off Arch's old-module cleanup: our kernels come as module tarballs, not pacman packages, and the next-boot and rollback trees must stay |
+| `vendor/systemd/system.conf.d/10-omamobile-reboot-watchdog.conf`, `sleep.conf.d/10-omamobile.conf` | `/usr/lib/systemd` | A hung shutdown resets the phone after a minute; suspend means s2idle (no SoC sleep sequence yet, and `deep` does not wake) |
+| `vendor/udev/rules.d/10-omamobile-storage.rules` | `/usr/lib/udev/rules.d` | Continues the initramfs storage guard: Android partitions stay hidden and the whole-disk node unusable |
+| `vendor/udev/rules.d/20-omamobile-torch.rules`, `70-omamobile-dma-heap.rules`, `72-omamobile-feedbackd.rules` | `/usr/lib/udev/rules.d` | The torch tile may set the LED's brightness; libcamera's software ISP gets the DMA-BUF heaps; feedbackd gets the haptics |
+| `vendor/systemd/network/20-usb-gadget.network`, `vendor/NetworkManager/conf.d/10-omamobile-usb.conf` | `/usr/lib/systemd/network`, `/usr/lib/NetworkManager/conf.d` | USB networking to a host (172.16.42.1, the host as a fallback route behind Wi-Fi); NetworkManager stays off the link |
+| `src/reboot-to.c` | `/usr/bin/reboot-to` | Reboot with a reason the bootloader understands. One source with the cheetah package |
+| `device.conf`, `etc/omamobile-mirrorlist` | `/usr/share/omamobile`, `/etc/pacman.d` | The device descriptor (a copy of `device/tegu/device.conf`) and the `[omamobile]` repository |
 
-The LM3644 torch rule grants the existing video group write access only to
-`white:torch/brightness` owned by that driver, for the normal quick-settings
-`brightnessctl` path. It neither loads a driver nor turns on the light. The
-kernel board current cap remains authoritative. On the local d816 kernel,
-the owner has confirmed rear-light on/off through the existing tile at the
-single tested minimum step; brightness tuning is still separate.
+`./build [DIR]` compiles the C tools, `./install DESTDIR [DIR]` stages
+everything and enables nothing beyond the two wants links, and `test/all`
+runs the package tests in a scratch root (`OMAMOBILE_TEGU_ROOT`), with no
+phone and no hardware.
 
-The qualified storage path and remaining standalone-boot limitation are in
-`device/tegu/UFS-PLAN.md` and `BOOT-PLAN.md`. The temporary recovery module
-is a bring-up tool, not production reboot support. `reboot-to` by itself
-does not provide the tested guarded bootloader route on this kernel.
+The package does not mark the boot slot successful (Derek decides how that
+works on the 9a), does not start Wi-Fi, NFC, the modem, the charger driver
+or the cameras, and carries no vendor files and no per-phone data.
 
-Build with `makepkg`; `test/all` checks the staged storage and USB policy.
-The package is self-contained and provides/conflicts with `omamobile-device`.
+## What the kernel command line has to stop carrying
+
+The bring-up boots with a command line that masks units and gates its own
+start scripts. The package's units cannot run under it. For the package to
+take over, `/chosen/bootargs` has to lose:
+
+- `systemd.unit=multi-user.target` (graphical.target is the default again);
+- every `systemd.mask=` for `sddm`, `display-manager`, `NetworkManager`,
+  `bluetooth`, the `omamobile-*` units and the `tegu-*` units;
+- `systemd.wants=tegu-curated-root-guard.service`,
+  `systemd.wants=tegu-curated-autostart.service` and
+  `systemd.wants=bluetooth.service`;
+- the flags `omamobile.tegu-curated-root`, `omamobile.tegu-curated-autostart`,
+  `omamobile.tegu-standard-reboot` and `omamobile.tegu-native-bluetooth`;
+- `modprobe.blacklist=gs_decon,panthor,cs40l26_vibra,hci_uart,leds_lm3644`
+  (`omamobile-tegu-guards.conf` does this now).
+
+`mem_sleep_default=s2idle`, `panic=10`, `s3c2410_wdt.tmr_atboot=1` and
+`cs40l26_vibra.max_buzz_ms=100` stay. Whether and when that DTB change
+happens is the owner's call.
+
+## The AoC start ships disabled
+
+`omamobile-tegu-aoc-start` is the Pixel 7 Pro's AoC start with the 9a's
+names (`154b0000.aoc`, `aoc-tegu.bin`, 93 services, the sensors' USF
+channel through `aoc_channel_dev`). It needs a kernel whose device tree
+enables the AoC, GSA and Trusty nodes; today the bring-up turns them on
+with out-of-tree overlay modules, and so `omamobile-tegu-aoc.service` has
+no wants link. Once a kernel enables them, `systemctl enable
+omamobile-tegu-aoc.service` and reboot; a failed start names the step in
+the journal and the marker, and the next boot leaves the AoC off until
+`omamobile-tegu-aoc-start --retry`.
+
+## Firmware the phone needs
+
+Nothing here is in the package; `tools/extract-vendor-firmware` and
+`tools/phone-provision` take it from the owner's own factory image:
+
+- `aoc-tegu.bin` (the AoC), `Top-tas2572RCA1.bin` and
+  `Bottom-tas2572RCA1.bin` (the speaker amplifiers);
+- `brcm/brcmfmac4383-pcie.bin`, `.clm_blob`, `.txcap_blob` and `.txt` (Wi-Fi);
+- `updates/brcm/BCM.google,zumapro-tegu.hcd` (Bluetooth);
+- `updates/cs40l26.wmfw` and `cs40l26.bin` (haptics);
+- `arm/mali/arch11.8/mali_csffw.bin` (the GPU's firmware, from Mesa's
+  packaging or the factory image).
+
+## Moving from the bring-up
+
+The bring-up on the first 9a lives in `/usr/local` and `/etc`, outside any
+package. After installing 0.2.0 and before the reboot that drops the
+command line above, take these off the phone by hand; the package cannot,
+and a leftover copy in `/etc` wins over the package's file of the same name.
+
+- Units and drop-ins in `/etc/systemd/system`: `tegu-curated-autostart`,
+  `tegu-curated-root-guard`, `tegu-curated-session`,
+  `tegu-curated-bluetooth-prepare`, `bluetooth.service.d/20-tegu-curated.conf`,
+  `omamobile-tegu-audio` (keep it only while the AoC still needs the
+  out-of-tree start; it conflicts with nothing in the package),
+  `tegu-dtb-deadman`, `tegu-rt9470-early-read`, and the retired
+  `tegu-battery`, `tegu-battery-hold`, `tegu-display`, `tegu-display-confirm`,
+  `tegu-gpu`, `tegu-touch` (with `tegu-touch.service.d`), `tegu-normal-reboot`,
+  `tegu-native-root-verify`, `tegu-native-root-deadman`, with their links
+  in `multi-user.target.wants`, `graphical.target.wants` and
+  `sysinit.target.wants`. `systemctl disable` each first.
+- `/etc/modprobe.d/omamobile-tegu-*.conf` and
+  `tegu-battery-gauge-bringup.conf` (the package's `omamobile-tegu-guards.conf`,
+  `-display.conf` and `-clk-acpm.conf` replace them;
+  `omamobile-tegu-fp-lhbm.conf` belongs to omamobile-fingerprint).
+- `/etc/udev/rules.d/20-omamobile-tegu-gpu-always-on.rules` (the GPU's
+  runtime suspend is qualified), `20-omamobile-tegu-torch-bringup.rules` and
+  `70-omamobile-dma-heap.rules` (the package has them).
+- `/etc/systemd/system.conf.d/10-tegu-bringup-watchdog.conf` (the package
+  sets the reboot watchdog; the 10 s runtime watchdog was the bring-up's).
+- `/etc/systemd/network/20-usb-gadget.network` (same content as the package's).
+- `/usr/lib/systemd/system-sleep/omamobile-tegu-wifi` and `-nfc` (the
+  package installs its own under the same names: pacman will refuse to
+  overwrite unowned files, so remove them first).
+- `/usr/local/bin/reboot-to`, `g7-*`, `nfc-ab`; `/usr/local/sbin/tegu-*`;
+  `/usr/local/libexec/tegu-*`; `/usr/local/lib/omamobile-tegu`
+  (`tegu-tcpc-switch` is `/usr/bin/tegu-tcpc-switch` now) and
+  `/usr/local/lib/omamobile-tegu-curated`.
+- `/var/lib/omamobile-tegu/curated` and the old per-kernel state
+  directories (`battery`, `display`, `gpu`, `touch`, `keys`, `pmu`, `time`,
+  `ui`, `wifi*`, `module-backup`); keep `audio`, `nfc` and `modem` while
+  `omamobile-tegu-audio-up` and `omamobile-tegu-modem-up` still load from them.
+
+`omamobile-tegu-audio-up`, `omamobile-tegu-modem-up` and the out-of-tree
+modules they load stay until the kernel carries their drivers and device
+tree nodes; the package's guards and theirs do not load the same modules.
+
+Licence: MIT.

@@ -1,0 +1,45 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# omamobile-tegu-usb-rescue in a scratch root, one pass at a time: a
+# configured gadget is left alone, an open switch on an unconfigured gadget
+# is closed once, a closed switch is not written, and a Type-C driver that
+# owns the chip ends the watch before the chip is read.
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+script=$PWD/bin/omamobile-tegu-usb-rescue
+fail() { printf 'not ok - usb-rescue: %s\n' "$1" >&2; exit 1; }
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+export OMAMOBILE_TEGU_ROOT=$tmp/root
+export OMAMOBILE_TEGU_RESCUE_GRACE=0
+export TEST_LOG=$tmp/calls
+export TEGU_TCPC_SWITCH=$tmp/bin/tegu-tcpc-switch
+udc=$OMAMOBILE_TEGU_ROOT/sys/class/udc/11110000.dwc3
+mkdir -p "$tmp/bin" "$udc" "$OMAMOBILE_TEGU_ROOT/sys/bus/i2c/devices/21-0025"
+cat > "$tmp/bin/tegu-tcpc-switch" <<'EOF'
+#!/bin/bash
+echo "$1" >> "$TEST_LOG"
+case $1 in switch) echo "${SW:-0x09}" ;; connect) echo 0x09 ;; esac
+EOF
+chmod +x "$tmp/bin/tegu-tcpc-switch"
+calls() { tr '\n' ' ' < "$TEST_LOG" | sed 's/ $//'; }
+
+: > "$TEST_LOG"; echo configured > "$udc/state"
+SW=0x00 "$script" --once >/dev/null
+[[ -z $(calls) ]] || fail "a configured gadget was touched: $(calls)"
+
+: > "$TEST_LOG"; echo 'not attached' > "$udc/state"
+out=$(SW=0x00 "$script" --once)
+[[ $(calls) == "switch connect" ]] || fail "an open switch was not closed once: $(calls)"
+[[ $out == *"closing the data switch"* ]] || fail "the close is not logged"
+
+: > "$TEST_LOG"
+SW=0x09 "$script" --once >/dev/null
+[[ $(calls) == "switch" ]] || fail "a closed switch was written: $(calls)"
+
+: > "$TEST_LOG"; ln -s /dev/null "$OMAMOBILE_TEGU_ROOT/sys/bus/i2c/devices/21-0025/driver"
+out=$(SW=0x00 "$script" --once)
+[[ -z $(calls) && $out == *"owns the chip"* ]] || fail "a Type-C driver did not end the watch: $(calls)"
+
+rm -f "$TEGU_TCPC_SWITCH"
+"$script" --once >/dev/null || fail "a missing helper is not fatal"
+echo 'ok - usb-rescue: closes an open switch once, defers to a Type-C driver'
