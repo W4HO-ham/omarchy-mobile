@@ -34,7 +34,8 @@
  *    is not the user's password: fprintd's own polkit check is what guards
  *    enrollment;
  *  - reads the touchscreen while an operation runs: a finger inside the
- *    sensor circle lights the circle (the panel's local_hbm_mode), then
+ *    sensor circle lights the circle (the panel's local_hbm_mode), then,
+ *    with the position scaled to panel pixels,
  *    onPointerDownWithContext and, a frame later, onUiReady; lifting the
  *    finger reverses that. The HAL reports halHandlesDisplayTouches and
  *    halControlsIllumination false, so both are the client's job.
@@ -934,6 +935,9 @@ static void lhbm(bool on)
 	lhbm_at = now_ms();
 }
 
+static int32_t touch_max_x, touch_max_y;	/* 0: unknown, no scaling */
+static int32_t scale(int32_t v, int32_t max, int32_t panel);
+
 static void pointer(bool down)
 {
 	AParcel *in = begin(session);
@@ -941,13 +945,16 @@ static void pointer(bool down)
 
 	if (down)
 		finger_since = time;
-	write_pointer(in, touch_x, touch_y, time, finger_since);
+	/* The HAL takes panel pixels, the frame of its sensor location. */
+	write_pointer(in, scale(touch_x, touch_max_x, panel_w),
+		      scale(touch_y, touch_max_y, panel_h), time, finger_since);
 	if (down) {
 		reply("FINGER DOWN");
-		call_void(session, S_ON_POINTER_DOWN_WITH_CONTEXT, in, "onPointerDown");
+		/* The HAL captures at pointer down: light the circle first. */
 		lhbm(true);
 		if (lhbm_lit)
 			usleep(lhbm_settle_ms * 1000);
+		call_void(session, S_ON_POINTER_DOWN_WITH_CONTEXT, in, "onPointerDown");
 		call_void(session, S_ON_UI_READY, begin(session), "onUiReady");
 	} else {
 		call_void(session, S_ON_POINTER_UP_WITH_CONTEXT, in, "onPointerUp");
@@ -1026,7 +1033,6 @@ struct input_absinfo_ {
 	int32_t value, minimum, maximum, fuzz, flat, resolution;
 };
 #define EVIOCGABS_(abs)	_IOR('E', 0x40 + (abs), struct input_absinfo_)
-static int32_t touch_max_x, touch_max_y;	/* 0: unknown, no scaling */
 
 static void touch_range(void)
 {
