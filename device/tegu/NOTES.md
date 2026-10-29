@@ -28,7 +28,7 @@ integration tree), DTB with the TCPC as a dual-role port.
   fresh boot. Two parts of that setup aren't in a public tree yet: the DT
   fragment (the TCPC as dual-role with `vbus-supply`, the graph to dwc3) and
   the RT9470 bring-up module that writes OTG_EN, JEITA_EN and the watchdog
-  bits. Both are in #136, as they ran, with a runbook. This supersedes
+  bits. They are on the kernel bring-up branch derekross/linux-omarchy-mobile#127, with the plan and runbook in #136. This supersedes
   #100's "the eUSB2 repeater doesn't take the host role yet".
 - **How the cable swaps were covered** [V]: attended, with W4HO at the
   palmtop for every swap. Taking the laptop out cuts the only link, so each
