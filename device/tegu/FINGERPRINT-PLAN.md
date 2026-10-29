@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Fingerprint plan (tegu / zumapro): fingerprint unlock on the palmtop
 
-Status (2026-10-28, evening): **F0 and F2-F5 passed (F4, the first RPMB write, on 2026-10-27 under D1 = A); F6a-F6c passed (the HAL runs with the factory calibration); F7 and F8 passed (the circle lights, a finger is enrolled); F9 fails: captures reach the matcher but don't match (image quality 15-26).** Earlier: **research and plan only, nothing run on the palmtop for
+Status (2026-10-29): **works: F0-F10 passed. The enrolled finger matches and other fingers don't, through the HAL and through fprintd, and the lock screen unlocks by fingerprint.** It needs the bridge and runner fixes in #135 and tg4c's LHBM on the panel's normal bands (`lhbm_od=4`). (F4, the first RPMB write, ran on 2026-10-27 under D1 = A.) Earlier: **research and plan only, nothing run on the palmtop for
 fingerprint.** Stage 16 of ALL-HARDWARE-PLAN (private). The
 Pixel 7 Pro stack works ([cheetah FINGERPRINT-PLAN](../cheetah/FINGERPRINT-PLAN.md),
 opt-in); this plan says what carries over to the Pixel 9a and what is new.
@@ -582,3 +582,16 @@ needs them.
   compared it with the shell's drawn target); the HAL's raw capture dump
   (`vendor.gf.debug.dump_data=1` wrote nothing). Many misses lock the sensor
   out (`LOCKOUT -1`); `omamobile-fp-ctl resetlockout` clears it.
+
+## F9-F10 results (2026-10-29, `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`)
+
+- **F9 passed.** With `lhbm_od=4` (the normal LHBM bands read from the
+  panel, which is where Google's tg4c sits after its first-stage
+  overdrive) and a fresh enrollment, `omamobile-fp-ctl auth` gave MATCH on
+  the first touch twice. A different finger gave NOMATCH.
+- **F10 passed.** fprintd was masked in the install image. Unmasked, it
+  finds the bridge's device, `fprintd-enroll` completes (20 stages), and
+  `fprintd-verify` matches. Locked with `omarchy-shell lock lock`, the
+  palmtop unlocked with the enrolled finger, and refused a different finger
+  several times. The libfprint driver still names the device "Pixel 7 Pro
+  under-display fingerprint sensor".
