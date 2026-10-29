@@ -614,7 +614,12 @@ cards on 10-27 and 10-28 and why it looked sleep-related. The fix is
 power-off hook and one without it, all with no NACK. Whether the poll loop
 was stopped for the cycle without the hook isn't recorded, so that cycle
 says nothing about the stop-poll rule yet (the 35 of 35 of 10-27 stand) and
-must be re-run with the hook's log. Ruled out on the way: the set-config
+must be re-run with the hook's log. Those results are from #131's first
+version (`core.c` blob `77fc35b61da5`, a fixed 200 ms wait after the reset);
+the merged version waits for the controller's CORE_RESET_NTF instead
+(`c96704ddd480`) and was re-run the same day for six power-ons (55-60 ms
+each, one 160 ms, no NACK, no timeout) and polling at 3 s and at 30 s after
+power-on, no NACK. Ruled out on the way: the set-config
 (A), quick retries (B; C, #128, closed), the clock pad forced on (a test
 module through the kernel's SMC-backed PMU regmap, one register, 0x3e84 bit 0
 set and bit 16 cleared: the NACKs went on, read back as before when it was
