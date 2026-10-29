@@ -19,7 +19,8 @@
 #   ufs-delay   A = Hibern8 after 150 ms idle (kernel default), B = after
 #               --delay-ms (default 4, the stock Android value)
 #   s2idle      A = awake, B = frozen in s2idle for the whole phase
-#               (rtcwake -m freeze, frozen again after an early wake). Turn
+#               (rtcwake -m freeze, or --suspend systemd; frozen again
+#               after an early wake). Turn
 #               the screen off after unplugging: both phases assume it off.
 #               Nothing runs while frozen, so both phases are measured
 #               from the gauge's charge counter (1 mAh steps: use phases of
@@ -105,6 +106,18 @@ case "$test" in
   s2idle)
     command -v rtcwake >/dev/null && grep -qw s2idle /sys/power/mem_sleep \
       || { echo "power-ab: needs rtcwake and s2idle" >&2; exit 1; }
+    case "$suspend" in
+      rtcwake) ;;
+      systemd)
+        # systemctl suspend enters what sleep.conf and mem_sleep resolve to;
+        # deep never wakes on these phones, so refuse unless that is s2idle
+        msm=$(systemd-analyze cat-config systemd/sleep.conf 2>/dev/null |
+              sed -n 's/^MemorySleepMode=//p' | tail -n1)
+        if [[ -n $msm ]]; then [[ ${msm%% *} == s2idle ]]
+        else grep -q '\[s2idle\]' /sys/power/mem_sleep; fi ||
+          { echo "power-ab: systemctl suspend would not enter s2idle here" >&2; exit 1; } ;;
+      *) echo "power-ab: --suspend takes rtcwake or systemd, not '$suspend'" >&2; exit 1 ;;
+    esac
     [[ -r "$bat/charge_counter" || -r "$bat/charge_now" ]] \
       || { echo "power-ab: the gauge has neither charge_counter nor charge_now" >&2; exit 1; } ;;
   units)
@@ -193,6 +206,9 @@ freeze_phase() { # one B phase of s2idle: frozen until the phase is over
   sync
   while left=$(( phase - ($(date +%s) - t0) )); (( left > 5 )); do
     if [[ $suspend == systemd ]]; then
+      # the sleep hooks run before the kernel freezes: with less than 30 s
+      # left the alarm could fire while still awake, so stay awake instead
+      if (( left < 30 )); then sleep "$left"; break; fi
       # the RTC alarm, then systemd's suspend (hooks included); back when the
       # success count moves or the alarm is well past
       local s0 t1
@@ -248,6 +264,8 @@ awk -F, -v test="$test" '
 # 9a's, gives): the charge used per phase over its duration. A phase spans its
 # first counted sample (after the settle) to its last; B (s2idle) its
 # B-freeze row to its B-end row. 1 mAh steps: longer phases, finer numbers.
+# (reported charge is the gauge's model-corrected remaining charge: coarser
+# than a coulomb counter, and the only sleep figure on a gauge without one)
 for col in 6:"charge counter" 7:"reported charge"; do
 awk -F, -v c="${col%%:*}" -v name="${col#*:}" '
   /^#/ || $1 == "time" || $c == "" { next }
