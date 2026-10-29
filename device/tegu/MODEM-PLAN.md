@@ -843,6 +843,43 @@ So with the clock and the cut right, what is left is one byte per back-to-back c
 - bring-up branch: [linux-omarchy-mobile#137](https://github.com/derekross/linux-omarchy-mobile/pull/137) (draft, `tegu-gnss-spi-bringup` on the owner's fork, head 8d77391d9, on top of the two kernel fixes): the gnssif_spi driver as ported (bb9999570), then one commit per variant in the order of the tries: 32-byte reads (401016f37), spi_mode and speed_hz (21cea1dd0), 32-bit words (45b492116), 60-byte pieces (7eec92532), w32p32 (c5223f5fc), the `fb_delay`/`cs_setup_us`/`osc` parameters with the USI3 mux write (cc78f333d), 8-bit words (840cac155), `hs` (e497c8be0, f8013d08b), the USI3 divider hold of the twenty-fourth try (b587e76f4), `rx_cpha`, the per-transfer `spi->mode` switch (f2dcd5241), `hold` (e8d4d64e2), `realign` 1-3 and `txshift` (b5229f35d, ff0eadd34, dacf3e304, a0877abc3), and the morning's `piece`, `carry`, `rx_gap_us`, the byte dump, `tx_gap_us`, padded writes, `psr` and `cs_hold_us` (dae13a1f9 to b8c423dda); the pdma1 ID probe and the runtime PL330 memcpy module (5f786c818, 288a87ecc); the feedback-delay-0, auto-CS, pdma1 and pdma1-swapped overlays (4d5548b4d); the g7 scripts and the offline CRC and bit-offset checks (8d77391d9). There was no separate USI3 mux-and-divider module: the mux write is the `osc` parameter and the divider hold the `div` parameter inside gnss_spi. Each test DTB and each of the morning's images reached slot B through our `bin/omamobile push`, run by a local wrapper that first runs `bin/omamobile images` with the base DTB and the overlays; `push` writes the `_b` images with `dd`, verifies them by sha256 and reboots with `reboot-to omamobile`. Never fastboot.
 - partition check (2026-10-29 10:20, after the night's sessions and resets, release `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`): `efs`, `efs_backup`, `modem_userdata`, `persist`, `modem_a` and `modem_b`, each found by `PARTNAME` and read with `sha256sum` only, all match the 10-28 read-only backup (`tegu-protected-post-android-20261028T174253Z`, off-repo), all `ro=1`, none mounted. The morning's tries ran about 08:15-09:20 local, before this check, so it covers them and their resets too; the next modem session starts from this baseline.
 
+**Stock's SPI configuration, read from the sources (2026-10-29, afternoon; no
+hardware).** Three things settle what stock does on this link, none of which
+the tries above reproduced together:
+
+- The board overlay (the private capture, fragment@110) gives the GNSS node
+  `swap-mode = <1>`, `spi-max-frequency = <3125000>`, `controller-data {
+  samsung,spi-feedback-delay = <0> }`, no `cs-gpios`, no `dma-mode` (the
+  SoC dtsi has the `dmas` line commented out: stock runs this SPI in PIO),
+  and no `samsung,spi-chip-select-mode`.
+- Google's `spi-s3c64xx.c` (google-modules/soc/gs at 183509aff980) makes
+  `cs_mode = AUTO_CS_MODE` the default when that property is absent
+  (`s3c64xx_get_slave_ctrldata()`), so stock drives chip select from the
+  controller (`SLAVE_SEL |= SLAVE_AUTO | NSC_CNT_2`): nCS asserted by the
+  hardware for the packet count and released with a two-clock inactive
+  gap, never by software around each transfer. Our zumapro port uses
+  manual native chip select (the SPI core asserts and releases it around
+  every 64-byte transfer). With `swap-mode` and 32-bit words Google's driver
+  programs `SWAP_CFG` (TX and RX byte and half-word swap); mainline has no
+  swap support and our 32-bit tries swapped in software.
+- Our running tree's node has `samsung,spi-feedback-delay = <2>`; stock's
+  is 0.
+- The gnssif port itself is byte for byte Google's (`gnss_link_device.c` and
+  `gnss_spi.c` differ from google-modules' gnssif_spi only by one include;
+  `gnss_main.c` by the platform glue), so the protocol handling, the
+  `gnss2ap_spi` ready handshake included, is stock's. Everything that differs
+  is in the SPI controller driver and the node.
+
+The "auto CS" try (`acs`, the night) ran with 32-bit words at 6.24 MHz,
+before the clock fix, and no try has run auto chip select at stock's clock
+with 8-bit words and feedback delay 0. That is the next boot when GNSS
+resumes (G3-A, attended, one DTB round): the `autocs` and `fb0` overlays from
+linux-omarchy-mobile#137 on the current kernel, 8-bit words, 3.07 MHz; then,
+if the first byte of a back-to-back block still goes missing, 32-bit words
+with the controller's own swap (`SWAP_CFG` as Google programs it, a small
+addition to the zumapro port) rather than a software swap. No analyzer in
+either.
+
 **Parked (2026-10-29, the owner's decision):** no logic analyzer, and no more module-level guessing. The two kernel changes stay ([linux-omarchy-mobile#138](https://github.com/derekross/linux-omarchy-mobile/pull/138), the signed-off replacement of #135); the as-ported gnssif and gnss_spi run on the palmtop. GNSS resumes when either a stock capture of SPI21's timing or a new idea about the first byte of a back-to-back block turns up.
 
 ### Suspend with the modem on (2026-10-27, early morning, same kernel)
