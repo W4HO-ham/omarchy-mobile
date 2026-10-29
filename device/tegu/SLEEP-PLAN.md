@@ -3,74 +3,71 @@
 
 Status (2026-10-29): s2idle works (RTC and power-key wakes; NFC and Wi-Fi
 have their own notes in NOTES and AGENTS), but the drain in sleep is high.
-This plan is an audit from the code, stock's device tree and a read-only
-snapshot of the palmtop, with candidates ranked by how much they likely
-cost, and a measurement runbook. Nothing here has been changed on the
-palmtop yet.
+This plan gathers what's measured, an audit from stock's device tree and
+a read-only snapshot of the palmtop, the candidates ranked, and a
+measurement runbook.
 
 Kernel: `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty` (the
 integration tree), the palmtop's bring-up DTB.
 
-## What the earlier numbers do and don't say
+## What's measured
 
-The 10-28 measurements (434-445 mA as it runs, 374-389 mA with MIF capped
-at 421 MHz) were taken with the screen on, so they measure the awake
-system, not sleep. They do say that MIF's rate matters. The sleep number
-still has to be measured, with the screen off and the cable out (runbook
-below).
+- **s2idle with the cable out: about 140 mA** (59 minutes, 2026-10-27).
+- **MIF in sleep** (cable in, buck off, Bluetooth blocked, 600 s RTC-woken
+  freezes): 371-373 mA at MIF 2028 MHz, 314 mA at 421 MHz, so lowering MIF
+  for sleep saves about 57 mA. With the cable in, the USB link keeps the
+  SoC busy, so this can't reproduce the cable-out figure. A PM-notifier
+  module (`tegu-mif-sleep`: 421 MHz at suspend-prepare, the old rate after
+  resume) is the policy to measure with the cable out.
+- **Cluster power-down was tried** (2026-10-28) through the hint Google's
+  `exynos-cpupm` writes on each idle entry (`CPU_INFORM`, PMU 0x860 + 4 x
+  cpu; 1 = C2, 2 = cluster power-down). The C2 hint was stable but saved
+  nothing measurable. Cluster power-down on all three clusters stopped
+  ACPM's DVFS channel within a second, then I2C and UFS stalled and the
+  watchdog reset the palmtop (Google never powers down cluster 0:
+  `cpd_cl0` has no `entry-allowed`). Clusters 1 and 2 alone were stable,
+  but no saving was measurable, screen on or off. Dropped.
 
 ## Candidates
 
-1. **No cluster or system idle states.** The CPUs have only WFI and the
-   per-core `c2` state (PSCI `0x10000`, as in Google's `zumapro-cpu.dtsi`).
-   Google adds cluster power-down for all three clusters (`cpd_cl0`-`cpd_cl2`)
-   and a system state (`sicd`, idle clock-down), each with a 10 ms target
-   residency, through Samsung's own `exynos-cpupm` driver and PMU wakeup
-   masks, not through PSCI domain states. Mainline has neither, so in s2idle
-   all three clusters stay powered and the SoC's clocks keep running. This is
-   likely the largest share. The work is a cluster/SICD path for zumapro
-   (PSCI OS-initiated domains if the firmware supports them, otherwise the
-   PMU sequence `exynos-cpupm` uses), and it needs its own plan.
+1. **MIF in sleep: about 57 mA**, measured with the cable in. Next is the
+   cable-out measurement with `tegu-mif-sleep`.
 2. **GNSS rails always on.** LDO9S-11S (`gnss-core` 1.2 V, `gnss-rf` 1.8 V,
    `gnss-aux` 1.8 V) are `regulator-always-on` in the bring-up DTB, so the
-   S5300's GNSS RF and core supplies stay up through sleep, with the modem
-   off too. In stock's DT they carry `channel-mux-selection` (subsys GPS):
-   the GNSS core switches them itself. Off unless the modem's GNSS runs.
+   S5300's GNSS supplies stay up through sleep, with the modem off too. In
+   stock's DT they carry `channel-mux-selection` (subsys GPS): the GNSS
+   core switches them itself. Off unless the modem's GNSS runs.
 3. **Fingerprint rail always on.** `udfps-3v3` (LDO15S) is also
-   `regulator-always-on` in the bring-up DTB. The sensor only needs it while
-   an operation runs.
-4. **MIF and the interconnect.** The awake numbers moved by about 55 mA with
-   MIF capped at 421 MHz. Whether MIF drops in s2idle, and to what, is
-   unread.
+   `regulator-always-on` in the bring-up DTB. The sensor only needs it
+   while an operation runs.
+4. **The system idle state (SICD).** Google's `cpupm` has a system state
+   (`sicd`, idle clock-down, 10 ms target residency) beside the cluster
+   ones. It hasn't been tried, and it would need the same PMU sequence.
+   Given the cluster results, it's lower than 1-3.
 5. **Smaller and unmeasured:** the eUSB2 repeater rails (`eusb-vdd`,
-   `eusb-vdda12`), touch (on for touch wake), the AoC and its sensors (on by
-   design), the NFC clock pad (always enabled while NFC is bound), and the
-   modem when it has been started (no suspend is allowed then, by the
+   `eusb-vdda12`), touch (on for touch wake), the AoC and its sensors (on
+   by design), the NFC clock pad (always enabled while NFC is bound), and
+   the modem when it has been started (no suspend is allowed then, by the
    inhibitor).
+
+The CPUs' own idle state works: cpu0's `c2` was entered about a million
+times by 2026-10-29, with 1304 rejected (EINVAL); cpu4 1148 of 46339, cpu7
+576 of 33173. The firmware's PSCI is v1.1 with no OS-initiated mode.
 
 ## Runbook (attended for the cable)
 
-**S1. Baseline (risk low).** Screen off, Wi-Fi as it runs, modem not
-started, cable out, `tools/power-ab` style detached logging of the fuel
-gauge's `current_avg` and `capacity` every 30 s for 30 minutes of
-`systemctl suspend` with RTC wakes every 5 minutes. Expect a number in mA.
-Stop: the palmtop doesn't come back on the cable within 5 minutes of the
-end (power key).
+**S1. Baseline, then MIF (risk low; attended for the cable).** Screen off,
+Wi-Fi as it runs, modem not started, cable out, detached logging of the fuel
+gauge's charge counter and `capacity` every 30 s across 30 minutes of
+`systemctl suspend` with RTC wakes every 5 minutes. Repeat with
+`tegu-mif-sleep` loaded. Expect about 140 mA, then less. Stop: the palmtop
+doesn't come back on the cable within 5 minutes of the end (power key).
 
-**S2. Rails (risk low).** Same as S1 with the three GNSS rails and
-`udfps-3v3` not always-on (a DTB round, through `push`, slot B marked first).
+**S2. Rails (risk low).** As S1 with the three GNSS rails and `udfps-3v3`
+not always-on (a DTB round through `push`, with slot B marked first).
 Expect: S1 minus their share.
-
-**S3. Clusters (risk medium-high).** After a cluster/SICD plan exists.
 
 ## Not known yet
 
-- The real sleep drain (S1).
-- Whether the firmware takes a cluster state at all. Its PSCI is v1.1 with
-  **no OS-initiated mode** and the original StateID format
-  (`/sys/kernel/debug/psci`, 2026-10-29), so cluster states would be
-  platform-coordinated: a deeper `arm,psci-suspend-param` in each CPU's
-  list (power level 1, power-down: `0x1010000`), which the firmware may
-  refuse or ignore without the PMU setup `exynos-cpupm` does first. The
-  core state works today: cpu0's `c2` was entered about a million times,
-  1304 rejected (EINVAL); cpu4 1148 of 46339, cpu7 576 of 33173.
+- What the GNSS and fingerprint rails cost in sleep (S2).
+- What MIF in sleep saves with the cable out (S1).
