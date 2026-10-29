@@ -560,6 +560,19 @@ startNmea 25; callbacks location 4, NMEA 5).
   unknown: suspend with the modem on is still unqualified on the 9a
   (AGENTS.md, "Suspend and modem").
 
+NFC across s2idle (2026-10-28, `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`):
+with polling stopped by the sleep hook, the palmtop wakes, but NFC doesn't
+work afterwards. The first send after the wake gets no I2C ACK (`nxp-nci_i2c
+25-0008: NFC: Error -6 on I2C send`, also after the driver's 110 ms retry),
+and every NCI request then times out. Powering the adapter off and on
+through neard (a fresh NCI init) brings it back (#132). A hook that stops
+the poll loop and powers the adapter off before the sleep, and on after it,
+was tried once that day with an RTC wake: the palmtop didn't wake and
+needed the power key. Whether the power-off took effect isn't known: the
+hook discarded neard's errors, and none of the journals kept from that day
+shows that sleep. The stop-poll hook stays until a power-off hook that checks
+`Powered` wakes in attended runs.
+
 ### M2: the link only (modem link driver, `allow_hw=1`; risk: medium)
 
 One step per run, the CPIF overlay not applied, the link overlay applied
