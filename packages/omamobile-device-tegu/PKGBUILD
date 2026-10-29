@@ -3,16 +3,17 @@
 pkgname=omamobile-device-tegu
 pkgver=$(cat "${startdir:-.}/version")
 pkgrel=1
-pkgdesc="Omarchy Mobile support for the Google Pixel 9a (tegu): storage guard and USB networking"
+pkgdesc="Omarchy Mobile support for the Google Pixel 9a (tegu): storage guard, USB networking, hang-safe graphics start"
 arch=(aarch64)
 url="https://github.com/derekross/omarchy-mobile"
 license=(MIT)
-depends=(bash systemd omamobile-keyring)
+depends=(bash systemd kmod i2c-tools bluez-utils omamobile-keyring)
 provides=(omamobile-device)
 conflicts=(omamobile-device)
 backup=(etc/pacman.d/omamobile-mirrorlist)
 install=omamobile-device-tegu.install
 makedepends=(gcc)
+checkdepends=(diffutils)
 
 build() {
   "$startdir/build" "$srcdir/build"
