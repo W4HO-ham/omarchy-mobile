@@ -4,9 +4,19 @@
 # Bluetooth controller at boot, hang-safe. All six drivers are in the kernel
 # tree and blacklisted for autoload (modprobe.d/omamobile-tegu-guards.conf),
 # so this script is the only thing that loads them, in this order, after a
-# marker has been written and synced. If the phone hangs in one of the steps,
-# the next boot finds the marker, leaves all of it alone and says so; after
+# marker has been written and synced. Each step keys on its own device node
+# (the GPU on 1f000000.gpu, the display on 19470000.display-controller, the
+# rest on their device-tree nodes), so a DTB without the GPU still gets its
+# display. A load or bind that returns but fails is logged and skipped, and
+# the start goes on to the next step: panthor without mali_csffw.bin must not
+# take the display with it. Only a step that never comes back keeps the
+# marker: the next boot finds it, leaves all of it alone and says so; after
 # reading the previous boot's log, run "omamobile-tegu-graphics-start --retry".
+#
+# The panel's DSI commands (gs_dsim_cmd.allow_tx, for brightness, sleep and
+# 120 Hz) are allowed only when the bootloader names the google-tg4c panel
+# on the command line (exynos_drm.panel_name=google-tg4c, kernel #90), and
+# before gs_decon loads, since gs-decon decides on 120 Hz at probe.
 #
 # This is the curated start of the bring-up (device/tegu/bringup) without its
 # file-hash manifest, EGL smoke test, mask checks, sddm start and bootloader
@@ -22,8 +32,10 @@ fi
 state=$root/var/lib/omamobile
 marker=$state/tegu-graphics-started
 dt=$root/proc/device-tree
+cmdline=$root/proc/cmdline
 gpu=$root/sys/bus/platform/devices/1f000000.gpu
 decon=$root/sys/bus/platform/devices/19470000.display-controller
+allow_tx=$root/sys/module/gs_dsim_cmd/parameters/allow_tx
 torch=$root/sys/class/leds/white:torch
 gauge=$root/sys/class/power_supply/max77779-battery
 haptics_node=$dt/soc/usi@10c900c0/i2c@10c90000/haptic-driver@43
@@ -47,6 +59,14 @@ bound() {
   done
   return 1
 }
+# The panel the bootloader named on the kernel command line, or nothing.
+panel_name() {
+  local word
+  for word in $(cat "$cmdline" 2>/dev/null); do
+    [[ $word == exynos_drm.panel_name=* ]] && { echo "${word#*=}"; return 0; }
+  done
+  echo ""
+}
 
 case ${1:-} in
   '') ;;
@@ -59,8 +79,8 @@ if [[ -e $marker ]]; then
   log "after checking the previous boot's log, retry with: omamobile-tegu-graphics-start --retry"
   exit 0
 fi
-if [[ ! -e $gpu ]]; then
-  log "no GPU in this DTB; nothing to do"
+if [[ ! -e $gpu && ! -e $decon ]]; then
+  log "no GPU and no display controller in this DTB; nothing to do"
   exit 0
 fi
 # Once per boot: a loaded driver is never unloaded or retried (AGENTS.md).
@@ -71,70 +91,117 @@ if [[ ${1:-} != --retry ]] && { loaded panthor || loaded gs_decon; }; then
   exit 0
 fi
 
-mkdir -p "$state"
+mkdir -p "$state" "$root/run"
 # The marker names the step in progress, so a hang is easy to place.
 phase() { printf '%s %s\n' "$(date -Is)" "$1" > "$marker"; sync -f "$marker" 2>/dev/null || sync; }
 finish() { rm -f "$marker"; sync -f "$state" 2>/dev/null || sync; }
-fail() { log "$*"; log "the marker stays: the next boot skips this start until --retry"; exit 1; }
+# A step that returned and failed: logged, skipped, the start goes on to the
+# next one. The marker is cleared at the end as after a good start: it is for
+# a step that never comes back, not for one that said no.
+up=
+failed=
+skip() { log "$2; skipped"; failed+="${failed:+, }$1"; }
 
-phase gpu
-modprobe panthor || fail "panthor failed"
-bound "$gpu" panthor 60 || fail "the GPU did not bind to panthor"
+if [[ -e $gpu ]]; then
+  phase gpu
+  if ! modprobe panthor; then
+    skip GPU "panthor failed (no mali_csffw.bin yet? see dmesg)"
+  elif ! bound "$gpu" panthor 60; then
+    skip GPU "the GPU did not bind to panthor (see dmesg)"
+  else
+    # The session's environment (uwsm/env.d/omamobile-tegu-graphics) reads
+    # this and picks hardware GL.
+    printf '{"gpu": "panthor", "by": "omamobile-tegu-graphics-start"}\n' > "$root/run/omamobile-tegu-gpu-ready.json"
+    up+="GPU"
+  fi
+else
+  log "no GPU in this DTB; skipped"
+fi
 
-# stage=2 is the full driver (the lower stages are bring-up probes); the
-# refresh rate and the panel-off behaviour come from modprobe.d.
-phase display
-modprobe gs_decon stage=2 fbdev=0 || fail "gs_decon failed"
-bound "$decon" gs-decon 60 || fail "the display controller did not bind to gs-decon"
-# The session's environment (uwsm/env) reads these: the display controller's
-# DRM node, whichever card number it got, and that the GPU is up.
-mkdir -p "$root/run"
-card=$(readlink -f "$root/dev/dri/by-path/platform-19470000.display-controller-card" 2>/dev/null || true)
-[[ -n $card ]] && printf '%s\n' "${card#"$root"}" > "$root/run/omamobile-tegu-display-card"
-printf '{"gpu": "panthor", "by": "omamobile-tegu-graphics-start"}\n' > "$root/run/omamobile-tegu-gpu-ready.json"
-up="GPU, display"
+if [[ -e $decon ]]; then
+  phase display
+  # gs_dsim_cmd is not guarded: it autoloads from its node ahead of this
+  # start and sends nothing until allow_tx is on. Loading it here (a no-op
+  # when it already is) makes the parameter file exist before the write.
+  modprobe gs_dsim_cmd 2>/dev/null || true
+  panel=$(panel_name)
+  if [[ $panel == google-tg4c ]]; then
+    if echo 1 > "$allow_tx" 2>/dev/null; then
+      log "panel $panel: DSI commands allowed (gs_dsim_cmd.allow_tx=1)"
+    else
+      log "panel $panel: could not write $allow_tx; the display stays read-only at 60 Hz"
+    fi
+  else
+    log "panel ${panel:-unnamed}: DSI commands stay off; the display stays read-only at 60 Hz"
+  fi
+  # stage=2 is the full driver (the lower stages are bring-up probes); the
+  # refresh rate and the panel-off behaviour come from modprobe.d.
+  if ! modprobe gs_decon stage=2 fbdev=0; then
+    skip display "gs_decon failed (see dmesg)"
+  elif ! bound "$decon" gs-decon 60; then
+    skip display "the display controller did not bind to gs-decon (see dmesg)"
+  else
+    # The session's environment reads the display controller's DRM node,
+    # whichever card number it got (the GPU may take card0).
+    card=$(readlink -f "$root/dev/dri/by-path/platform-19470000.display-controller-card" 2>/dev/null || true)
+    [[ -n $card ]] && printf '%s\n' "${card#"$root"}" > "$root/run/omamobile-tegu-display-card"
+    up+="${up:+, }display"
+  fi
+else
+  log "no display controller in this DTB; skipped"
+fi
 
 if enabled "$haptics_node"; then
   phase haptics
-  modprobe cs40l26_vibra || fail "cs40l26_vibra failed"
-  up+=", haptics"
+  if modprobe cs40l26_vibra; then up+="${up:+, }haptics"; else skip haptics "cs40l26_vibra failed (see dmesg)"; fi
 else
   log "no haptics in this DTB; skipped"
 fi
 
 if enabled "$torch_node"; then
   phase torch
-  modprobe leds_lm3644 || fail "leds_lm3644 failed"
-  for _ in $(seq 40); do [[ -e $torch/brightness ]] && break; sleep 0.25; done
-  if [[ ! -e $torch/brightness ]]; then
-    log "no white:torch LED after the driver loaded (see dmesg)"
-  elif [[ $(cat "$torch/brightness") != 0 ]]; then
-    fail "the torch came up lit; it must start off"
+  if ! modprobe leds_lm3644; then
+    skip torch "leds_lm3644 failed (see dmesg)"
   else
-    up+=", torch"
+    for _ in $(seq 40); do [[ -e $torch/brightness ]] && break; sleep 0.25; done
+    if [[ ! -e $torch/brightness ]]; then
+      log "no white:torch LED after the driver loaded (see dmesg)"
+    elif [[ $(cat "$torch/brightness") != 0 ]]; then
+      # It must start off: turn it off here and say so.
+      echo 0 > "$torch/brightness" 2>/dev/null
+      skip torch "the torch came up lit; turned off (brightness now $(cat "$torch/brightness" 2>/dev/null))"
+    else
+      up+="${up:+, }torch"
+    fi
   fi
 else
   log "no torch in this DTB; skipped"
 fi
 
 phase gauge
-modprobe max77779_battery || fail "max77779_battery failed"
-for _ in $(seq 40); do [[ -e $gauge/capacity ]] && break; sleep 0.25; done
-if [[ -e $gauge/capacity ]]; then
-  up+=", gauge $(cat "$gauge/capacity") %"
+if ! modprobe max77779_battery; then
+  skip gauge "max77779_battery failed (see dmesg)"
 else
-  log "no max77779-battery supply after the driver loaded (see dmesg)"
+  for _ in $(seq 40); do [[ -e $gauge/capacity ]] && break; sleep 0.25; done
+  if [[ -e $gauge/capacity ]]; then
+    up+="${up:+, }gauge $(cat "$gauge/capacity") %"
+  else
+    log "no max77779-battery supply after the driver loaded (see dmesg)"
+  fi
 fi
 
 # The address and the power-on are omamobile-bt-addr@'s, started by udev.
 if enabled "$bluetooth_node"; then
   phase bluetooth
-  modprobe hci_uart || fail "hci_uart failed"
-  up+=", Bluetooth"
+  if modprobe hci_uart; then up+="${up:+, }Bluetooth"; else skip Bluetooth "hci_uart failed (see dmesg)"; fi
 else
   log "no Bluetooth in this DTB; skipped"
 fi
 
 finish
-log "up: $up"
+log "up: ${up:-nothing}"
+if [[ -n $failed ]]; then
+  log "failed: $failed (these loads returned, so the marker is clear; --retry tries them again)"
+  exit 1
+fi
 exit 0

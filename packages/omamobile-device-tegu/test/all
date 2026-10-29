@@ -118,6 +118,10 @@ grep -q 'RuntimeWatchdogSec' "$tmp/root/usr/lib/systemd/system.conf.d/10-omamobi
   && fail "no runtime watchdog from the package"
 grep -q 'Before=display-manager.service' "$tmp/root/usr/lib/systemd/system/omamobile-tegu-graphics.service" \
   || fail "the graphics start runs before the display manager"
+for node in 1f000000.gpu 19470000.display-controller; do
+  grep -qx "ConditionPathExists=|/sys/bus/platform/devices/$node" "$tmp/root/usr/lib/systemd/system/omamobile-tegu-graphics.service" \
+    || fail "the graphics start runs when $node exists (ORed condition)"
+done
 grep -q 'After=omamobile-tegu-graphics.service' "$tmp/root/usr/lib/systemd/system/display-manager.service.d/10-omamobile-tegu.conf" \
   || fail "the display manager waits for the graphics start"
 for absent in usr/bin/omamobile-boot-success usr/bin/omamobile-bootctl \
@@ -129,19 +133,27 @@ for absent in usr/bin/omamobile-boot-success usr/bin/omamobile-bootctl \
 done
 pass "install stages the package, enables only the guards, and nothing that marks a slot"
 
-# Every driver the graphics guard loads is kept from autoloading, and nothing
-# in modprobe.d would break the guard's own modprobe.
-for m in $(grep -oE '^modprobe [a-z0-9_]+' bin/omamobile-tegu-graphics-start | cut -d' ' -f2 | sort -u); do
+# Every driver the graphics guard loads is kept from autoloading (gs_dsim_cmd
+# aside: it autoloads from its node and sends nothing until allow_tx is on,
+# which only the guard sets), and nothing in modprobe.d would break the
+# guard's own modprobe.
+for m in $(grep -v '^ *#' bin/omamobile-tegu-graphics-start | grep -oE '\bmodprobe [a-z0-9_]+' | cut -d' ' -f2 | sort -u); do
+  [[ $m == gs_dsim_cmd ]] && continue
   grep -qx "blacklist $m" vendor/modprobe.d/omamobile-tegu-guards.conf \
     || fail "$m is loaded by the graphics guard but not blacklisted"
+done
+for m in panthor gs_decon cs40l26_vibra leds_lm3644 max77779_battery hci_uart; do
+  grep -qE "modprobe $m\b" bin/omamobile-tegu-graphics-start || fail "the graphics guard no longer loads $m"
 done
 for m in gsa gs201_aoc_sysmmu mailbox_wc aoc_core aoc_channel_dev aoc_alsa_dev aoc_char_dev; do
   grep -qx "blacklist $m" vendor/modprobe.d/omamobile-tegu-aoc.conf \
     || fail "$m is loaded by the AoC guard but not blacklisted"
 done
 grep -qE '^install ' vendor/modprobe.d/*.conf && fail "an install line in modprobe.d would break a guard's modprobe"
-grep -qE '^options gs_dsim_cmd .*allow_tx=1' vendor/modprobe.d/omamobile-tegu-display.conf \
-  || fail "the panel's DSI commands are allowed"
+grep -qE '^options gs_dsim_cmd' vendor/modprobe.d/omamobile-tegu-display.conf \
+  && fail "allow_tx belongs to the graphics start (google-tg4c only), not modprobe.d"
+grep -q 'exynos_drm.panel_name=google-tg4c' bin/omamobile-tegu-graphics-start \
+  || fail "the graphics start keys allow_tx on the bootloader's panel name"
 [[ $(grep -c 'max_refresh=' vendor/modprobe.d/omamobile-tegu-display.conf) == 1 ]] \
   || fail "exactly one refresh-rate ceiling"
 grep -qE '^options clk_acpm zumapro_gpu_max_khz=[0-9]+' vendor/modprobe.d/omamobile-tegu-clk-acpm.conf \
