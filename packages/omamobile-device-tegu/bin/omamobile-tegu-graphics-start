@@ -64,7 +64,9 @@ if [[ ! -e $gpu ]]; then
   exit 0
 fi
 # Once per boot: a loaded driver is never unloaded or retried (AGENTS.md).
-if loaded panthor || loaded gs_decon; then
+# --retry goes on from where the last start stopped: modprobe leaves a
+# loaded driver as it is, so the steps already done cost nothing.
+if [[ ${1:-} != --retry ]] && { loaded panthor || loaded gs_decon; }; then
   log "already started this boot"
   exit 0
 fi
