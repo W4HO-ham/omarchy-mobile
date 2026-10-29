@@ -66,4 +66,11 @@ Expect: S1 minus their share.
 ## Not known yet
 
 - The real sleep drain (S1).
-- Whether the firmware's PSCI supports OS-initiated cluster states on zumapro.
+- Whether the firmware takes a cluster state at all. Its PSCI is v1.1 with
+  **no OS-initiated mode** and the original StateID format
+  (`/sys/kernel/debug/psci`, 2026-10-29), so cluster states would be
+  platform-coordinated: a deeper `arm,psci-suspend-param` in each CPU's
+  list (power level 1, power-down: `0x1010000`), which the firmware may
+  refuse or ignore without the PMU setup `exynos-cpupm` does first. The
+  core state works today: cpu0's `c2` was entered about a million times,
+  1304 rejected (EINVAL); cpu4 1148 of 46339, cpu7 576 of 33173.
