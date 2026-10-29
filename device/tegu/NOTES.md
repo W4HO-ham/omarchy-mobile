@@ -25,16 +25,41 @@ integration tree), DTB with the TCPC as a dual-role port.
   (SRC_READY), VBUS holds at 5.2 V, the data role goes to host, and the
   drive enumerates at high speed (`sde: sde1 sde2`). With the drive out and
   the laptop back: sink, a PD contract, the gadget configured. Again after a
-  fresh boot.
+  fresh boot. Two parts of that setup aren't in a public tree yet: the DT
+  fragment (the TCPC as dual-role with `vbus-supply`, the graph to dwc3) and
+  the RT9470 bring-up module that writes OTG_EN, JEITA_EN and the watchdog
+  bits. Both are in #136, as they ran, with a runbook. This supersedes
+  #100's "the eUSB2 repeater doesn't take the host role yet".
+- **How the cable swaps were covered** [V]: attended, with W4HO at the
+  palmtop for every swap. Taking the laptop out cuts the only link, so each
+  sampling script carried its own dead-man: with no USB gadget configured 6
+  to 8 minutes after the cable came out, it unloaded `tcpci_maxim` and set
+  the role switch back to device, so the laptop would come back as a sink.
+  It never fired, because the laptop came back every time. The DTB boot
+  itself ran under a one-boot DTB dead-man. The next run uses a reboot
+  timer armed before the unplug and stopped over a fresh login (#136's
+  runbook). `tools/usbc-deadman` is written for the 7 Pro's MAX77759 and
+  doesn't apply here.
 - **Why VBUS collapsed at first** [V]: the RT9470's JEITA temperature
-  control (0x0c bit 7) was on and read hot (STAT2 0x80), and its I2C
-  watchdog (0x01 bits 1:0) had expired (STAT3 0x20). With either set, the
+  control (0x0c bit 7) was on with STAT2 reading 0x80, and its I2C
+  watchdog (0x01 bits 1:0) had expired (STAT3 0x20). That JEITA read "hot"
+  is an inference [I]: the TS pin may have no thermistor on it, which
+  hasn't been checked. With either set, the
   boost reported OTG (ICSTAT 0x0f) while VBUS fell from 5.2 V within ~60 ms,
   and TCPM retried every second. Google's `rt9471_charger` turns JEITA off
   on the 9a (`en-jeita` is unset in `zumapro-buck-charge-rt9471.dtsi`) and
   only runs the watchdog while it kicks it. With both off, VBUS holds under
   Rd and Rp, with and without AutoDischargeDisconnect. The boost's driver
   has to clear both.
+- **What that leaves open** [I]: with the watchdog off, nothing turns the
+  boost off after a crash. What a warm reboot with host mode on leaves
+  behind (the RT9470's OTG bit and ICSTAT before any driver loads) hasn't
+  been measured, so whether VBUS stays out across one is unknown. With
+  JEITA off the RT9470 has no temperature cut-off of its own, which
+  matters only if it charges. Its CE comes from the MAX77779's sGPIO 7,
+  which hasn't been read. On the charger with the battery full, FUNCTION
+  read 0x41 (`CHG_EN` set) and ICSTAT 0xf1 (VBUS ready, not charging), so
+  whether it charges under our kernel isn't known yet.
 - **The eUSB2 side** [V]: the PHY has to come out of reset with the device
   attached. A drive plugged into a port that's already host isn't seen
   (the TUSB2E11's attach-detect interrupt never latched). TCPM's flow
@@ -53,7 +78,8 @@ integration tree), DTB with the TCPC as a dual-role port.
   payload length at 0x6c). Written into the chroot's private `mfg_data.img`
   copy (the partition itself untouched), it's accepted:
   `vendor.gf.cali.state = 1`, and the "No SA calibration present" line is
-  gone. Enrollment is next.
+  gone. Later that evening enrollment completed, but matching doesn't work
+  yet (#135).
 - **GNSS** [V]: telling the AoC the GNSS type (`gnss-type = <2>`, as
   Google's `zumapro-phone-ignss.dtsi`) doesn't change the fault. Kepler
   loads and goes OPERATIONAL, and the HAL starts a session, but every engine
