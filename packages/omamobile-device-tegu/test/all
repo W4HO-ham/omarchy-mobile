@@ -14,6 +14,8 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 for script in build install bin/* vendor/systemd/system-sleep/* test/*; do
   bash -n "$script" || fail "$script parses"
 done
+# uwsm sources the env.d file with a POSIX shell
+sh -n uwsm/env.d/omamobile-tegu-graphics || fail "the uwsm env.d file parses as POSIX shell"
 pass "scripts parse"
 
 grep -q '\.\./\.\.' build install && fail "build or install reaches outside the package directory"
@@ -85,6 +87,7 @@ for f in usr/bin/reboot-to usr/bin/tegu-tcpc-switch \
          usr/lib/udev/rules.d/70-omamobile-dma-heap.rules usr/lib/udev/rules.d/72-omamobile-feedbackd.rules \
          usr/lib/systemd/network/20-usb-gadget.network \
          usr/lib/NetworkManager/conf.d/10-omamobile-usb.conf \
+         usr/share/uwsm/env.d/omamobile-tegu-graphics \
          usr/share/omamobile/device.conf \
          usr/share/omamobile/device-tegu/version \
          usr/share/licenses/omamobile-device-tegu/LICENSE \
@@ -122,6 +125,9 @@ for node in 1f000000.gpu 19470000.display-controller; do
   grep -qx "ConditionPathExists=|/sys/bus/platform/devices/$node" "$tmp/root/usr/lib/systemd/system/omamobile-tegu-graphics.service" \
     || fail "the graphics start runs when $node exists (ORed condition)"
 done
+grep -q 'omamobile-tegu-display-card' "$tmp/root/usr/share/uwsm/env.d/omamobile-tegu-graphics" \
+  && grep -q 'omamobile-tegu-gpu-ready.json' "$tmp/root/usr/share/uwsm/env.d/omamobile-tegu-graphics" \
+  || fail "the session reads the graphics start's two files"
 grep -q 'After=omamobile-tegu-graphics.service' "$tmp/root/usr/lib/systemd/system/display-manager.service.d/10-omamobile-tegu.conf" \
   || fail "the display manager waits for the graphics start"
 for absent in usr/bin/omamobile-boot-success usr/bin/omamobile-bootctl \
