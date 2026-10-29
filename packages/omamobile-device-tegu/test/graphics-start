@@ -76,6 +76,13 @@ grep -q '^gs_decon .*allow_tx=1$' "$TEST_LOG" || fail "allow_tx was not 1 before
 [[ $(cat "$allow_tx") == 1 ]] || fail "allow_tx was not written"
 [[ $out == *"panel google-tg4c: DSI commands allowed"* ]] || fail "the allow is not logged: $out"
 
+# The bootloader's form, the name with the panel's id appended (the palmtop's
+# command line): allowed too
+reset; cmdline google-tg4c.2d008004
+out=$("$script")
+grep -q '^gs_decon .*allow_tx=1$' "$TEST_LOG" || fail "the suffixed panel name was not allowed: $(grep '^gs_decon' "$TEST_LOG")"
+[[ $out == *"panel google-tg4c.2d008004: DSI commands allowed"* ]] || fail "the suffixed allow is not logged: $out"
+
 # Another panel: allow_tx stays 0, gs_decon still loads
 reset; cmdline google-xyz9
 out=$("$script")

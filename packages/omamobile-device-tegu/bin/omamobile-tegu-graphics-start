@@ -15,7 +15,8 @@
 #
 # The panel's DSI commands (gs_dsim_cmd.allow_tx, for brightness, sleep and
 # 120 Hz) are allowed only when the bootloader names the google-tg4c panel
-# on the command line (exynos_drm.panel_name=google-tg4c, kernel #90), and
+# on the command line (exynos_drm.panel_name=google-tg4c, with the panel's
+# id appended by the bootloader, kernel #90), and
 # before gs_decon loads, since gs-decon decides on 120 Hz at probe.
 #
 # This is the curated start of the bring-up (device/tegu/bringup) without its
@@ -125,7 +126,8 @@ if [[ -e $decon ]]; then
   # when it already is) makes the parameter file exist before the write.
   modprobe gs_dsim_cmd 2>/dev/null || true
   panel=$(panel_name)
-  if [[ $panel == google-tg4c ]]; then
+  # the bootloader appends the panel's id (google-tg4c.2d008004 on the palmtop)
+  if [[ $panel == google-tg4c || $panel == google-tg4c.* ]]; then
     if echo 1 > "$allow_tx" 2>/dev/null; then
       log "panel $panel: DSI commands allowed (gs_dsim_cmd.allow_tx=1)"
     else
