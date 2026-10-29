@@ -59,6 +59,24 @@ udev from their DT nodes. Re-pinning (recomputing the manifest's sha256 values
 after a deliberate change) only matters when a pinned module changes. This
 runbook changes none.
 
+**The three nodes against #127 (2026-10-29).** #127 at `5dd15e31c` built on
+maclab (`dtbs` only, the palmtop's config) and compared with the palmtop's
+running tree (`/sys/firmware/fdt`), both decompiled with `dtc`: the
+`i2c@108d0000` (gauge, TCPC with `try-power-role = "sink"`, charger with
+`chgin-otg`), `usi@10ca00c0`/`i2c@10ca0000` (hsi2c10, the boost at 0x5b)
+and `usb@11210000` nodes have the same properties and values; only phandle
+numbers, the clock-controller phandle inside `clocks` and the order of
+sub-nodes differ. So the run counts as #127's for those nodes.
+
+**The peripheral role on warm reboots (2026-10-29).** The running
+`usb@11210000` has `dr_mode = "otg"` with `usb-role-switch` and
+`role-switch-default-mode`, and in four warm reboots today (09:15, 09:19,
+09:55 and 10:19 local, `reboot-to omamobile` with the laptop attached) the
+gadget came up as peripheral every time (`/sys/class/udc/11210000.usb/state`
+`configured`, `tools/phone-smoke` "USB gadget ok, bound to 11210000.usb").
+Cold boot and a replug with no host attached are still to be shown (#127's
+point 7); they need a hand on the cable.
+
 ## Runbook (attended, on the charger, W4HO at the palmtop)
 
 Forced restart if the palmtop hangs, also in a shutdown under the swap timer:
@@ -212,9 +230,18 @@ installed in H2, unless H2's rollback is wanted.
 - Why JEITA tripped. "Read hot" is an inference: the TS pin may have no
   thermistor on it.
 - Whether the RT9470 charges under our kernel. Its CE comes from the
-  MAX77779's sGPIO 7, which hasn't been read. On the charger with the
+  MAX77779's sGPIO 7 (stock's `rt,ceb_gpio`). On the charger with the
   battery full, FUNCTION read 0x41 (`CHG_EN` set) and ICSTAT 0xf1 (VBUS
   ready, not charging). Since #127 turns JEITA off only while the boost is
   on, this matters only in host mode.
-- Where stock's source PDO (5 V, 900 mA in the run) comes from. It isn't
-  traced to a stock file yet.
+- ~~Where stock's source PDO (5 V, 900 mA in the run) comes from.~~ Traced
+  (10-29): Google's zuma `dts/max777x9-tcpc.dtsi`, included by tegu's
+  `zuma-tegu-typec.dtsi`, sets `PDO_FIXED(5000, 900, SUSPEND | USB_COMM |
+  DATA_SWAP | DUAL_ROLE)` ("Extboost can only do ~1A"). The run advertised
+  USB_COMM and DATA_SWAP only; the mergeable board takes stock's set.
+- The RT9470's lines in stock's DT (10-29, `zumapro-buck-charge-rt9471.dtsi`
+  and `zuma-tegu-charging.dtsi` in Google's tegu tree): interrupt on the
+  MAX77779's sGPIO 6 (`PLC_INT_L`), chip enable on sGPIO 7, and stock's
+  driver services the 40 s watchdog from that interrupt. Our kernel has no
+  MAX77779 sGPIO driver yet, which is why the bring-up node has no
+  interrupt and the boost runs with the watchdog off.
