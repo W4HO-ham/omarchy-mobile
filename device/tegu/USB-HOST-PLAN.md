@@ -7,8 +7,11 @@ runbook for the next one, which adds two measurements for
 derekross/linux-omarchy-mobile#124: unbinding the charger with a drive
 attached, and a reset without shutdown with host mode on. The device tree and
 the RT9470 module are on the kernel bring-up branch
-derekross/linux-omarchy-mobile#127 (`tegu-usb-host-bringup` at `5dd15e31c`, not
-for merge). The two boot helpers are in `device/tegu/usb-host/`.
+derekross/linux-omarchy-mobile#127 (`tegu-usb-host-bringup`, now at
+`5ada9ab0f`, not for merge: after the `5dd15e31c` the DTB comparison below
+used, `0caff021a` only changed a comment, `6c5d97e18` reworks the boost
+driver and `5ada9ab0f` adds the PMIC node and the boost's lines; H2b boots
+that build). The boot helpers are in `device/tegu/usb-host/`.
 
 ## What it builds on
 
@@ -32,11 +35,10 @@ table), and that image's hash changes with the overlay set, so the base
 build is the reference. For this run to count as #124's evidence, gn3's
 `i2c@108d0000` (hsi2c6: the fuel gauge, `tcpc@25`, `charger@69` with its
 `chgin-otg` regulator), `i2c@10ca0000` (hsi2c10, the boost at 0x5b) and
-`usb@11210000` nodes are to be compared with a build of #127 at
-`5dd15e31c`: build `zumapro-tegu.dtb` from that head, decompile both
-(`dtc -I dtb -O dts`) and diff those three nodes. gn3's side is decompiled
-and has all three; the #127 build hasn't been made yet, so the diff is
-open. The next run boots no new DTB and needs no DTB dead-man.
+`usb@11210000` nodes were compared with a build of #127 at `5dd15e31c`
+(both decompiled with `dtc -I dtb -O dts`; the result is below, "The three
+nodes against #127"). The next run boots no new DTB until H2b, and needs
+no DTB dead-man.
 
 The `tegu-dtb-deadman` used on 10-28 was a one-boot unit: if the gadget
 wasn't configured 180 s into an armed boot, it wrote a known-good
@@ -104,8 +106,9 @@ too; it is the evidence of what ran last.
 scripts in `device/tegu/usb-host/`, installed in H2 and started detached
 with `systemd-run --unit=…`, so the swap doesn't kill them. Each logs to
 `/var/log/omamobile/` and reads with `i2cget` only; H4's one write is the
-unbind, H5's the sysrq. Both wait for the laptop link to go and for a drive
-to enumerate, and do nothing if either never happens.
+unbind, H5's the sysrq (and the removal of the early read's marker when it
+doesn't reset). Both wait for the laptop link to go and for a drive to
+enumerate, and do nothing if either never happens.
 
 **H1. Precondition (read-only, plus one unit disabled; risk none).**
 `tools/phone-ssh 'uname -r; cat /proc/device-tree/__symbols__/otg_boost;
@@ -207,9 +210,12 @@ the device's `driver/unbind`) and logs kmsg, VBUS as the TCPC measures it
 x-deadman.timer`, and read the log. Stop: the laptop doesn't come back as a
 sink before the timer fires, or an oops in kmsg when the drive comes out or
 the laptop goes in (TCPM disabling a regulator whose driver is gone); either
-goes in this plan. Rollback: the timer's reboot (the meter rule applies if
-the drive is still in; it boots like H3 with the laptop attached). Reboot
-before H5 in any case: after the unbind TCPM holds a stale handle on
+goes in this plan. Rollback: the timer's reboot. If the laptop went back in
+first, that boot is H3's. If the drive is still in, the meter rule applies
+and the boot is in H5's position (the boost module blacklisted, no Type-C
+driver on the MAX77779), so follow H5's swap text: wait for the rescue
+unit, then the forced restart with the laptop attached. Reboot before H5 in
+any case: after the unbind TCPM holds a stale handle on
 `chgin-otg`, and a rebind gives it nothing new, so H5's host mode needs H3's
 boot again, with the `modprobe`.
 
@@ -219,15 +225,22 @@ laptop in as a sink). Arm the early read for the next boot (`mkdir -p
 /var/lib/omamobile-tegu/rt9470-early-read; touch
 /var/lib/omamobile-tegu/rt9470-early-read/armed`; H2 installed and enabled
 its script and unit). With the boost module blacklisted from H2, the read
-runs before any RT9470 driver. Arm the swap timer, start the script detached
-(`systemd-run --unit=tegu-usb-host-h5 /usr/local/sbin/tegu-usb-host-h5-reset`),
-and swap to the drive. The script refuses to reset unless the early read is
-armed and enabled and a drive has enumerated; 20 s after the drive
-enumerates it logs the boost's state to `/var/log/omamobile/usb-host-h5.log`,
-syncs, and runs `echo b > /proc/sysrq-trigger`. `systemctl reboot` would run
-the charger's `.shutdown`, which turns the boost off, so it can't show what
-a crash leaves. Then, with the inline USB-C meter between the palmtop and
-the drive:
+runs before any RT9470 driver. Arm the swap timer (`systemd-run
+--unit=x-deadman --on-active=300 systemctl reboot`), start the script
+detached (`systemd-run --unit=tegu-usb-host-h5
+/usr/local/sbin/tegu-usb-host-h5-reset`), and swap to the drive. The script
+refuses to reset unless the early read is armed and enabled and a drive has
+enumerated; 20 s after the drive enumerates it logs the boost's state to
+`/var/log/omamobile/usb-host-h5.log`, syncs, and runs `echo b >
+/proc/sysrq-trigger`. On every exit without a reset (no drive in 3 minutes,
+the laptop never leaving, the sysrq not taking) it removes the `armed`
+marker, so a fallback reboot (the swap timer firing first, a `systemctl
+reboot` with the charger's `.shutdown`) doesn't produce an early-read log
+under the same name. **The early read counts only when `usb-host-h5.log`
+ends with the "resetting now" line.** `systemctl reboot` would run the
+charger's `.shutdown`, which turns the boost off, so it can't show what a
+crash leaves. Then, with the inline USB-C meter between the palmtop and the
+drive:
 - Expect: VBUS falls to 0 within the reboot (the meter rule: stop if it is
   still up two minutes after the reset).
 - The boot comes up with the drive attached and no laptop. The initramfs
