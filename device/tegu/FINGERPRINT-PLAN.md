@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Fingerprint plan (tegu / zumapro): fingerprint unlock on the palmtop
 
-Status (2026-10-28): **F0 and F2-F5 passed (F4, the first RPMB write, on 2026-10-27 under D1 = A); F6a and F6b passed; F6c waits for the factory calibration, which the owner fetched on 2026-10-28.** Earlier: **research and plan only, nothing run on the palmtop for
+Status (2026-10-28, evening): **F0 and F2-F5 passed (F4, the first RPMB write, on 2026-10-27 under D1 = A); F6a-F6c passed (the HAL runs with the factory calibration); F7 and F8 passed (the circle lights, a finger is enrolled); F9 fails: captures reach the matcher but don't match (image quality 15-26).** Earlier: **research and plan only, nothing run on the palmtop for
 fingerprint.** Stage 16 of ALL-HARDWARE-PLAN (private). The
 Pixel 7 Pro stack works ([cheetah FINGERPRINT-PLAN](../cheetah/FINGERPRINT-PLAN.md),
 opt-in); this plan says what carries over to the Pixel 9a and what is new.
@@ -533,3 +533,50 @@ needs them.
   and its id stay in the owner's private reference folder, never in the
   repository or a log. Next: hand it to the TA from Linux, without writing
   `mfg_data`.
+- 2026-10-28, afternoon: the HAL injects the calibration itself
+  (`DataSynchronizer::injectMtCali`). It reads a 112-byte header from offset
+  0 of `/dev/block/by-name/mfg_data` and logged "No SA calibration present"
+  on the zeros. The file `get-cal-url` names has exactly that layout: magic
+  `0xca11ca11`, version 1, and at 0x6c the payload length (file size − 112).
+  With the file written at offset 0 of the chroot's private `mfg_data.img`
+  copy (the real partition untouched), the "No SA calibration" line is gone
+  and the HAL sets `vendor.gf.cali.state = 1`. Next: enrollment (F8/F9, the
+  owner's finger).
+
+## F7-F8 results (2026-10-28, evening, `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`)
+
+- **F7 seen by eye.** LHBM, ported into the upstream-form `panel-google-tg4c`
+  (`allow_lhbm=1`, `local_hbm_mode` and `local_hbm_max_timeout` on the
+  backlight device), lit
+  the circle at 120 Hz, and the owner saw a white circle at the sensor.
+- **F8 passed: a finger is enrolled.** With the factory calibration in
+  the chroot's `mfg_data.img`, the bridge (rebuilt for the runner's
+  `--panel`) and `omamobile-fp-ctl enroll`: FINGER DOWN, ACQUIRED, and
+  PROGRESS counting down from 12 to 0, then ENROLLED.
+- **F9 doesn't match yet.** Every authenticate touch comes back ACQUIRED 2
+  (PARTIAL), with the HAL logging `valid_area=100` but `image_quality=29`.
+  A 300 ms LHBM settle changed nothing. Lead: the port wrote only `0x87 0x05`.
+  Google's tg4c first writes the LHBM brightness, the panel's own RGB values
+  per band read from 0xD1 on CMD2 page 2 plus an overdrive offset chosen by
+  the gray level under the circle, and then the LHBM gamma
+  (`0x6F 0x07; 0x87 0x01-0x04` by brightness).
+- **F9, later that evening.**
+  DSI reads now work (`gs-dsim-cmd` read support: the read request needs
+  `DSIM_PKTHDR_BTA`, bit 24), so the LHBM brightness bands are read from the
+  panel and written with overdrive group 0 and the gamma. PARTIAL stayed.
+  The HAL's log then showed three bridge and runner bugs (omamobile-fingerprint
+  0.1.11, PR #135): the HAL got raw touchscreen positions (10x panel pixels,
+  5432,17847 for the 540,1756 circle), it captures at
+  `onPointerDownWithContext` (before `onUiReady`, while the circle was still
+  dark), and it parses the refresh rate after the `@` in
+  `panel0-backlight/state` (`on: 1080x2424@120`; a bare `on` logged "Failed
+  to parse refresh rate"). With all three fixed, enrollment completes and
+  authenticate captures come back GOOD and reach the matcher, but every one
+  is NOMATCH at `image_quality` 15-26, at screen brightness 1500 and 3628
+  alike. Open leads: Google picks the overdrive group from the luminance
+  under the circle and restores the normal bands at a second stage
+  (`tg4c_set_local_hbm_brightness(ctx, false)`), where the port always uses
+  group 0; whether the circle reaches LHBM luminance at all (nobody has yet
+  compared it with the shell's drawn target); the HAL's raw capture dump
+  (`vendor.gf.debug.dump_data=1` wrote nothing). Many misses lock the sensor
+  out (`LOCKOUT -1`); `omamobile-fp-ctl resetlockout` clears it.
