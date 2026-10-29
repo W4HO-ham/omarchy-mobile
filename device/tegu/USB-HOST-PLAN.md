@@ -22,13 +22,33 @@ for merge). The two boot helpers are in `device/tegu/usb-host/`.
 | eUSB2 repeater, PHY | #118, the integration tree |
 | Kernel the palmtop runs | `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty` (integration tree) |
 
-The palmtop already boots a DTB with this setup (the "gn3" round), so the next
-run boots no new DTB and needs no DTB dead-man. The `tegu-dtb-deadman` used
-on 10-28 was a one-boot unit: if the gadget wasn't configured 180 s into an
-armed boot, it wrote a known-good `vendor_kernel_boot` image (checked against
-a stored sha256 first, and read back after) into `vendor_kernel_boot_b` from
-the palmtop and rebooted. It is a second path writing slot B next to `bin/omamobile
-push`. It stays unarmed, and it won't be used again unless that's agreed first.
+The palmtop already boots a DTB with this setup: the "gn3" build of
+`zumapro-tegu.dtb`, sha256
+`cde78d026e45da119fbcdcfb5eedb9900b636db5c027889a9e96fe66c2eac049` (the
+`dtb_sha256` of its build record). gn3 is the ot6 round's USB-C device tree
+plus the GNSS `gnss-type` change, so it isn't #127 byte for byte. The push
+kit ships it with the kit's overlays applied (status flips and the GPU OPP
+table), and that image's hash changes with the overlay set, so the base
+build is the reference. For this run to count as #124's evidence, gn3's
+`i2c@108d0000` (hsi2c6: the fuel gauge, `tcpc@25`, `charger@69` with its
+`chgin-otg` regulator), `i2c@10ca0000` (hsi2c10, the boost at 0x5b) and
+`usb@11210000` nodes are to be compared with a build of #127 at
+`5dd15e31c`: build `zumapro-tegu.dtb` from that head, decompile both
+(`dtc -I dtb -O dts`) and diff those three nodes. gn3's side is decompiled
+and has all three; the #127 build hasn't been made yet, so the diff is
+open. The next run boots no new DTB and needs no DTB dead-man.
+
+The `tegu-dtb-deadman` used on 10-28 was a one-boot unit: if the gadget
+wasn't configured 180 s into an armed boot, it wrote a known-good
+`vendor_kernel_boot` image (checked against a stored sha256 first, and read
+back after) into `vendor_kernel_boot_b` from the palmtop and rebooted. It is
+a second path writing slot B next to `bin/omamobile push`. It stays unarmed
+(H1 checks that and disables the unit), and it won't be used again unless
+that's agreed first. Whether it ever fired: the laptop's logs of the 10-28
+rounds show every armed boot's gadget coming up (the evening run started
+with the gadget configured) and no write, but the unit's own log on the
+palmtop, `/var/log/omamobile/dtb-deadman.log`, is the record. H1 reads it,
+and its answer goes here.
 
 **The curated autostart** is the 9a's private bring-up startup
 (`/usr/local/lib/omamobile-tegu-curated/<release>/curated-native-start.py`,
@@ -44,67 +64,147 @@ runbook changes none.
 Forced restart if the palmtop hangs, also in a shutdown under the swap timer:
 hold Power about 30 s until it is off, then press Power. Stop the run if slot
 B isn't marked successful: this runbook doesn't mark it (marking is a separate
-`devinfo` operation under the rules settled on #125), and nothing here
+`devinfo` operation under the rules being settled on #125), and nothing here
 writes a boot partition.
 
-**H1. Precondition (read-only; risk none).** `tools/phone-ssh 'uname -r;
-cat /proc/device-tree/__symbols__/otg_boost; for r in /sys/class/regulator/*;
-do grep -H . $r/name; done | grep -E "otg-boost|chgin-otg"'`.
-Expect: the release above, the `otg_boost` symbol, and both regulators.
-Stop: either regulator missing (an older DTB).
+**The meter rule.** Any reset while the drive is attached is a crash with
+host mode on: H5's `echo b`, H4's swap timer firing, or a forced restart
+with the drive in. After each one, with the inline USB-C meter between the
+palmtop and the drive, expect VBUS to fall to 0 within the reboot. **Stop if
+VBUS is still up two minutes after the reset.** Don't plug the laptop in
+(two sources on VBUS); unplug the drive and report it.
 
-**H2. Modules for the run (risk low).** Blacklist the boost module, so its
-node can't load it before the early read: `echo "blacklist tegu_rt9471_boost"
-> /etc/modprobe.d/omamobile-tegu-otg-bringup.conf`. Install the boost module
-from #127 (`597a2251…`) and the charger built from #124's head `4970bcdc3820`
-(`e5a4c78e…`), both staged in `/var/lib/omamobile-tegu/usb-host/`, over
+**After any unexpected reset** (a forced restart, a crash loop; not the
+timer's planned reboot), read pstore on the next boot before anything else.
+Ramoops works on the 9a (round ps1): `/sys/fs/pstore/` holds
+`dmesg-ramoops-*` for an oops and `console-ramoops-0` for the last console
+lines, and systemd-pstore moves them to `/var/lib/systemd/pstore/` soon
+after boot. Quote the lines in this plan. H5's reset leaves a console record
+too; it is the evidence of what ran last.
+
+**The detached scripts.** The steps that run with the laptop out use the
+scripts in `device/tegu/usb-host/`, installed in H2 and started detached
+with `systemd-run --unit=…`, so the swap doesn't kill them. Each logs to
+`/var/log/omamobile/` and reads with `i2cget` only; H4's one write is the
+unbind, H5's the sysrq. Both wait for the laptop link to go and for a drive
+to enumerate, and do nothing if either never happens.
+
+**H1. Precondition (read-only, plus one unit disabled; risk none).**
+`tools/phone-ssh 'uname -r; cat /proc/device-tree/__symbols__/otg_boost;
+for r in /sys/class/regulator/*; do grep -H . $r/name; done | grep -E
+"otg-boost|chgin-otg"; ls /dev/i2c-*; systemctl is-enabled tegu-dtb-deadman;
+ls /var/lib/omamobile-tegu/dtb-deadman/armed; tail -3
+/var/log/omamobile/dtb-deadman.log'`.
+Expect: the release above, the `otg_boost` symbol, both regulators, the I2C
+device nodes (`i2c-dev` is a module, loaded by then in a session; the early
+read loads it itself, since it runs before `systemd-modules-load`), and the
+DTB dead-man unarmed: its `armed` marker absent (that `ls` fails), and its
+log's last armed boot ending in "gadget configured at Ns: keeping this
+DTB", with no "wrote the good DTB image" line. Then `systemctl disable
+tegu-dtb-deadman`, so arming it again takes a deliberate step; its files
+stay on the palmtop for a DTB round under its own plan. Stop: either
+regulator missing (an older DTB), or the marker present (remove it, and say
+so here).
+
+**H2. Modules and helpers for the run (risk low).** Blacklist the boost
+module, so its node can't load it before the early read: `echo "blacklist
+tegu_rt9471_boost" > /etc/modprobe.d/omamobile-tegu-otg-bringup.conf`.
+Install the boost module from #127 (`597a2251…`) and the charger built from
+#124's head `4970bcdc3820` (`e5a4c78e…`), both staged in
+`/var/lib/omamobile-tegu/usb-host/`, over
 `/usr/lib/modules/$(uname -r)/updates/otg/`, keeping the old files as
 `*.before-h2`, then `depmod -a`. These live under one release's `updates/`,
 so after every `push` of a new kernel they must be rebuilt and reinstalled.
-Rollback: put the `*.before-h2` files back and run `depmod -a`.
+Then the helpers, streamed from the laptop (`tools/phone-ssh 'cat > /usr/local/sbin/NAME'
+< device/tegu/usb-host/NAME`): `tegu-rt9470-early-read`,
+`tegu-usb-host-h4-unbind` and `tegu-usb-host-h5-reset` into
+`/usr/local/sbin/` (`chmod 0755`), `tegu-rt9470-early-read.service` into
+`/etc/systemd/system/`, then `systemctl daemon-reload; systemctl enable
+tegu-rt9470-early-read`. Expect: `systemctl is-enabled tegu-rt9470-early-read`
+says `enabled`, and the unit does nothing yet (its marker is absent until H5
+arms it). Rollback: put the `*.before-h2` files back, `depmod -a`, and H6's
+removal of the helpers.
 
 **H3. Boot with the boost module held back (risk low).** Reboot, with kmsg
 streamed to the laptop. Expect: the gadget comes up as before (it ran before
 the TCPC node existed), the charger waits for `otg-boost-supply`, and the
 TCPC waits for the charger. Stop: no SSH 3 minutes after the reboot (forced
-restart, then H2's rollback). Then load the boost module by hand (`modprobe
-tegu_rt9471_boost`) with kmsg streamed. Expect: `otg-boost` and `chgin-otg`
-registered and disabled, and the TCPC probes as a sink with the laptop
-attached.
+restart with the laptop attached, then H2's rollback). Then load the boost
+module by hand (`modprobe tegu_rt9471_boost`) with kmsg streamed. Expect:
+`otg-boost` and `chgin-otg` registered and disabled, and the TCPC probes as
+a sink with the laptop attached.
 
 **H4. Unbind the charger with the drive attached (#124; risk medium).**
 Arm the swap timer first: `systemd-run --unit=x-deadman --on-active=300
-systemctl reboot`. Swap the laptop for the drive. Expect host mode as on
-10-28 (the drive enumerates). Then, from a script started before the swap,
-unbind `max77779-charger` 20 s after the drive enumerates and log kmsg,
-VBUS (TCPC 0x70/0x71) and `CHG_CNFG_00` (0xbc). Expect a clean kmsg, VBUS
-at 0 and `CHG_CNFG_00` reading 0x05. Laptop back in. Over a fresh login
-(`tools/phone-ssh --fresh`), stop the timer: `systemctl stop x-deadman.timer`.
-Stop: the laptop doesn't come back as a sink before the timer fires.
+systemctl reboot`. Start the script detached: `systemd-run
+--unit=tegu-usb-host-h4 /usr/local/sbin/tegu-usb-host-h4-unbind`. Swap the
+laptop for the drive. Expect host mode as on 10-28 (the drive enumerates).
+The script then unbinds the charger 20 s after the drive enumerates (through
+the device's `driver/unbind`) and logs kmsg, VBUS as the TCPC measures it
+(0x70/0x71) and `CHG_CNFG_00` (0xbc) at 1, 5 and 20 s, to
+`/var/log/omamobile/usb-host-h4.log`. Expect a clean kmsg, VBUS at 0 and
+`CHG_CNFG_00` reading 0x05. Laptop back in. Over a fresh login
+(`tools/phone-ssh --fresh`), stop the timer: `systemctl stop
+x-deadman.timer`, and read the log. Stop: the laptop doesn't come back as a
+sink before the timer fires, or an oops in kmsg when the drive comes out or
+the laptop goes in (TCPM disabling a regulator whose driver is gone); either
+goes in this plan. Rollback: the timer's reboot (the meter rule applies if
+the drive is still in; it boots like H3 with the laptop attached). Reboot
+before H5 in any case: after the unbind TCPM holds a stale handle on
+`chgin-otg`, and a rebind gives it nothing new, so H5's host mode needs H3's
+boot again, with the `modprobe`.
 
 **H5. Reset without shutdown with host mode on (#124, #127; risk
-medium-high).** Arm the early read for the next boot (`mkdir -p
+medium-high).** From a fresh H3 boot (the boost module loaded by hand, the
+laptop in as a sink). Arm the early read for the next boot (`mkdir -p
 /var/lib/omamobile-tegu/rt9470-early-read; touch
-/var/lib/omamobile-tegu/rt9470-early-read/armed`; the script and unit are in
-`device/tegu/usb-host/`). With the boost module blacklisted from H2, the read
-runs before any RT9470 driver. Arm the swap timer, swap to the drive, and
-from a script started before the swap, `echo b > /proc/sysrq-trigger` 20 s
-after the drive enumerates. `systemctl reboot` would run the charger's
-`.shutdown`, which turns the boost off, so it can't show what a crash leaves.
-Then, with an inline USB-C meter between the palmtop and the drive:
-- Expect: VBUS falls to 0 within the reboot.
-- **Stop if VBUS is still up two minutes after the reset.** Don't plug the
-  laptop in (two sources on VBUS). Unplug the drive and report it.
-- Otherwise put the laptop back in. The log `/var/log/omamobile/rt9470-early-read.log`
-  has the OTG bit (FUNCTION 0x02 bit 1) and ICSTAT before any driver, and
-  again at 60 s. If the boost had survived, a read at 60 s also shows
-  whether the regulator core's unused-regulator cleanup turned it off (only
-  if the module had loaded by then, which H2's blacklist prevents; a second
-  run without the blacklist would show it).
+/var/lib/omamobile-tegu/rt9470-early-read/armed`; H2 installed and enabled
+its script and unit). With the boost module blacklisted from H2, the read
+runs before any RT9470 driver. Arm the swap timer, start the script detached
+(`systemd-run --unit=tegu-usb-host-h5 /usr/local/sbin/tegu-usb-host-h5-reset`),
+and swap to the drive. The script refuses to reset unless the early read is
+armed and enabled and a drive has enumerated; 20 s after the drive
+enumerates it logs the boost's state to `/var/log/omamobile/usb-host-h5.log`,
+syncs, and runs `echo b > /proc/sysrq-trigger`. `systemctl reboot` would run
+the charger's `.shutdown`, which turns the boost off, so it can't show what
+a crash leaves. Then, with the inline USB-C meter between the palmtop and
+the drive:
+- Expect: VBUS falls to 0 within the reboot (the meter rule: stop if it is
+  still up two minutes after the reset).
+- The boot comes up with the drive attached and no laptop. The initramfs
+  hands over to Arch without waiting for USB (its no-gadget crash is killed
+  with the other helpers at the switch), and neither the root guard nor the
+  curated start checks the gadget, so the early read runs (early, and at
+  60 s), writes its log and removes its marker. The charger and the TCPC
+  wait for the blacklisted boost module, so no Type-C driver owns the
+  MAX77779 in this boot.
+- Swap the drive for the laptop. Expect: no SSH is guaranteed after the
+  swap. The chip opens its USB data switch when the drive comes out (AGENTS,
+  "USB"), and no Type-C driver closes it. The one thing that can is
+  `omamobile-tegu-usb-rescue` (started every boot by the audio-up script),
+  which rewrites `USBSW_CTRL` to 0x09 once VBUS is present and the gadget
+  has been unconfigured for 4 s, so the link may come back by itself. Give
+  it two minutes over a fresh login (`tools/phone-ssh --fresh`). If there is
+  no SSH by then: forced restart with the laptop attached (Power about 30 s,
+  then Power), which boots like H3. The early-read log is on disk by then,
+  so nothing is lost.
+- Then read `/var/log/omamobile/rt9470-early-read.log`: the OTG bit
+  (FUNCTION 0x02 bit 1) and ICSTAT before any driver, and again at 60 s. If
+  the boost had survived, a read at 60 s also shows whether the regulator
+  core's unused-regulator cleanup turned it off (only if the module had
+  loaded by then, which H2's blacklist prevents; a second run without the
+  blacklist would show it). Quote both reads, H5's log and the console
+  record from pstore here.
+Rollback: the forced restart with the laptop attached, then H6.
 
-**H6. Afterwards (risk low).** Remove `omamobile-tegu-otg-bringup.conf`, run
-`depmod -a`, and reboot. The modules stay as installed in H2, unless H2's
-rollback is wanted.
+**H6. Afterwards (risk low).** Remove `omamobile-tegu-otg-bringup.conf` and
+run `depmod -a`. Take the helpers out: `systemctl disable
+tegu-rt9470-early-read`, then remove
+`/etc/systemd/system/tegu-rt9470-early-read.service`, the three scripts from
+`/usr/local/sbin/` and `/var/lib/omamobile-tegu/rt9470-early-read/` (its
+marker is already gone), and `systemctl daemon-reload`. Keep the logs under
+`/var/log/omamobile/` and quote them here. Then reboot. The modules stay as
+installed in H2, unless H2's rollback is wanted.
 
 ## Not known yet
 
