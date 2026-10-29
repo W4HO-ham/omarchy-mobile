@@ -90,20 +90,41 @@ switches them through the PMIC's channel mux; LDO15S is `L15S_SPARE`,
 (the fingerprint sensor node has no supply; FINGERPRINT-PLAN). So the
 four feed GNSS and the fingerprint sensor only, by stock's DT.
 
+A phandle finds every DT supply reference, but the regulator core also
+looks a supply up by `regulator-name` when a driver asks for one the DT
+doesn't give it, so stock's kernel source was grepped for the four names
+too (`L15S_SPARE`, `L9S_GNSS_CORE`, `L10S_GNSS_RF`, `L11S_GNSS_AUX`, and
+`S2MPG15_LDO9`-`11`/`15`): `devices/google/tegu`, `devices/google/zuma*`
+and `google-modules`. They appear only in device tree sources
+(`zumapro-pmic.dtsi`, `zuma-pmic.dtsi`, the GNSS board dtsi files, and
+tegu's udfps dtsi, which makes LDO15S always-on at 3.3 V) and in the
+S2MPG15 register header. No vendor module asks for any of them by name:
+the GNSS module uses no regulator at all, and the fingerprint tree's
+`regulator_get` by name is in the FPC driver, not tegu's Goodix one. The
+gap is closed.
+
 ## Runbook (attended for the cable)
 
 Preconditions for the whole runbook:
 
 - **Slot B.** Stop if slot B isn't marked successful; this runbook doesn't
-  mark it (on the 9a marking is a `devinfo` write, under the rules settled
-  on <https://github.com/derekross/omarchy-mobile/pull/125>). An unmarked
+  mark it (on the 9a marking is a `devinfo` write, under the rules being
+  settled on <https://github.com/derekross/omarchy-mobile/pull/125>). An unmarked
   B burns an ABL retry on every boot, and a cycle that resets the palmtop
   counts as one.
 - **NFC.** S1 and S2 run `systemctl suspend` cycles, and on the 9a a
   suspend with neard polling reset the palmtop (2026-10-27; AGENTS,
   "Suspend and modem"). Before the first cycle: the stop-poll sleep hook
   (`omamobile-tegu-nfc` on the palmtop, not in the repository yet) is
-  installed and its unit active, or polling is stopped by hand. The
+  installed and its unit active, or polling is stopped by hand. Either
+  way, read neard's `Polling` property before each run (a neard restart
+  starts polling again):
+
+  ```sh
+  tools/phone-ssh 'busctl get-property org.neard /org/neard/nfc0 org.neard.Adapter Polling'
+  ```
+
+  It must read `b false`. The
   palmtop's current kernel carries the nxp-nci change of
   <https://github.com/derekross/linux-omarchy-mobile/pull/131> (its
   `core.c` is in the running tree, blob 77fc35b61da5), which turns the
@@ -119,9 +140,22 @@ Preconditions for the whole runbook:
   in this plan.
 
 **S1. Baseline, then MIF (risk low; attended for the cable).** Screen off,
-Wi-Fi as it runs, modem not started, cable out, detached logging of the fuel
-gauge's charge counter and `capacity` every 30 s across 30 minutes of
-`systemctl suspend` with RTC wakes every 5 minutes. Repeat with
+Wi-Fi as it runs, modem not started, cable out. The run is `tools/power-ab`
+with the systemd suspend mode of
+<https://github.com/derekross/omarchy-mobile/pull/157>, so S1 waits for
+#157 to merge:
+
+```sh
+tools/phone-ssh 'power-ab --detach --unplug 180 --phase 1800 --rounds 2 --suspend systemd s2idle'
+```
+
+`--suspend systemd` arms the RTC with `rtcwake -m no` and runs `systemctl
+suspend`, so the NFC sleep hook runs (a freeze written to
+`/sys/power/state` would skip it). Phase A is awake with the screen off,
+phase B is the 30-minute sleep, two rounds. The 9a's gauge has no
+`charge_counter`, so the figure is the `charge_now` column of the CSV
+(column 7, `charge_now_uah`): the gauge's model-corrected remaining
+charge, coarser than a coulomb counter, hence the long phases. Repeat with
 `tegu-mif-sleep` loaded (the module commit above, built against the running
 kernel). Expect about 140 mA, then less. Stop: the palmtop doesn't come
 back on the cable within 5 minutes of the end (power key). Rollback:
@@ -131,7 +165,14 @@ rate at suspend-prepare and puts the old one back at resume), or a reboot.
 **S2. Rails (risk low).** As S1 with the three GNSS rails and `udfps-3v3`
 not always-on: the running DTB with `regulator-always-on` removed from
 LDO9S-11S and LDO15S, nothing else (the S2 commit above). Not in or around
-a G3 (GNSS) session: GNSS is off for this boot. Steps:
+a G3 (GNSS) session: GNSS is off for this boot.
+
+S2 turns LDO15S off on purpose, for this one boot, although
+FINGERPRINT-PLAN's Risks table says our S2MPG15 description must not
+switch it off as unused: the sensor is unpowered for the boot, and that
+is the point of the measurement. FINGERPRINT-PLAN (on
+<https://github.com/derekross/omarchy-mobile/pull/138>'s branch) gets the
+matching note as a follow-up once it is on main. Steps:
 
 1. **Before (read-only).** On the running DTB, 60 s or more after boot,
    save `/sys/kernel/debug/regulator/regulator_summary` to
@@ -141,14 +182,26 @@ a G3 (GNSS) session: GNSS is off for this boot. Steps:
    `vendor_kernel_boot.img` differs from the running set (sha256 of each
    image against the running kit), so the push changes the DTB and
    nothing else. Stop if any other image differs.
-3. **Push and boot.** Don't start the modem in this boot: the S5300's
-   GNSS supplies are off. Fingerprint doesn't work either.
+3. **Push and boot.** Precondition, before the push: the fingerprint
+   stack stays stopped in that boot. `omamobile-fp.service` and anything
+   that starts the trusted app or `storageproxyd` (the `omamobile-fp-stage`
+   transient unit, `omamobile-fp-chroot start …` by hand, fprintd) are
+   disabled or masked before the push and put back after the rollback.
+   F6c is still writing secure objects, and nothing in Trusty should meet
+   a sensor with no power while the calibration question is open. Check
+   after the boot: `systemctl list-units 'omamobile-fp*'` empty, no
+   `storageproxyd` process. Don't start the modem in this boot: the
+   S5300's GNSS supplies are off. Nothing on the palmtop starts the modem
+   at boot (it is started by hand with `omamobile-tegu-modem-up`,
+   MODEM-PLAN), so there is nothing to mask; just don't run it.
 4. **After (read-only).** 60 s or more after boot, save the summary again
    and diff it against the before file. Expect: LDO9S, LDO10S, LDO11S and
-   LDO15S read disabled (the regulator core's unused-rail cleanup about
-   30 s after late init), and nothing else changed. Stop if anything other
-   than those four changed: push the running DTB's image back before any
-   suspend.
+   LDO15S read disabled, and nothing else changed. All four are off at
+   hand-off and without `regulator-always-on` nothing turns them on, so
+   they read disabled whether or not the regulator core's 30 s unused-rail
+   cleanup has run (which matters if the S2MPG15 regulators ever register
+   after it). Stop if anything other than those four changed: push the
+   running DTB's image back before any suspend.
 5. **Measure.** S1's cycles. Expect S1 minus the four rails' share.
 
 Rollback: push the running DTB's image back (the before/after check of
