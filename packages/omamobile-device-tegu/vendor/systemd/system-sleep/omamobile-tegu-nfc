@@ -1,0 +1,48 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# systemd-sleep hook for the Pixel 9a's NFC (ST54L on nxp-nci): after an
+# s2idle wake the controller doesn't answer on I2C until the adapter is
+# powered off and on (kernel #132). Before the sleep: stop the poll loop,
+# power the adapter off and check that Powered reads false (the kernel
+# refuses a device-down while polling, EBUSY). If it doesn't, leave it with
+# polling stopped. After the wake: power it on, check, and restart the poll
+# loop if it was polling. Logs every step. Nothing happens without neard.
+# OMAMOBILE_TEGU_ROOT: a scratch root for the package tests.
+root=${OMAMOBILE_TEGU_ROOT:-}
+A=/org/neard/nfc0
+D=$root/run/omamobile
+L=$root/var/log/omamobile/nfc-sleep.log
+mkdir -p "$D" "${L%/*}"
+log() { echo "$(date -Is) $1: $2" >> "$L"; }
+prop() { busctl get-property org.neard $A org.neard.Adapter "$1" 2>/dev/null; }
+is_true() { prop "$1" | grep -c true >/dev/null; }
+case "$1" in
+  pre)
+    rm -f "$D/nfc-was-polling" "$D/nfc-was-powered"
+    is_true Polling && : > "$D/nfc-was-polling"
+    if is_true Powered; then
+      : > "$D/nfc-was-powered"
+      out=$(busctl call org.neard $A org.neard.Adapter StopPollLoop 2>&1) || log pre "StopPollLoop: $out"
+      for i in 1 2 3 4 5; do is_true Polling || break; sleep 0.2; done
+      out=$(busctl set-property org.neard $A org.neard.Adapter Powered b false 2>&1) || log pre "Powered false: $out"
+      for i in 1 2 3 4 5; do is_true Powered || break; sleep 0.2; done
+      log pre "polling=$(prop Polling) powered=$(prop Powered)"
+      sync
+    else
+      log pre "adapter already off"
+    fi
+    ;;
+  post)
+    if [[ -e $D/nfc-was-powered ]]; then
+      rm -f "$D/nfc-was-powered"
+      out=$(busctl set-property org.neard $A org.neard.Adapter Powered b true 2>&1) || log post "Powered true: $out"
+      for i in 1 2 3 4 5 6 7 8 9 10; do is_true Powered && break; sleep 0.3; done
+    fi
+    if [[ -e $D/nfc-was-polling ]]; then
+      rm -f "$D/nfc-was-polling"
+      out=$(busctl call org.neard $A org.neard.Adapter StartPollLoop s Initiator 2>&1) || log post "StartPollLoop: $out"
+    fi
+    log post "polling=$(prop Polling) powered=$(prop Powered)"
+    ;;
+esac
+exit 0
