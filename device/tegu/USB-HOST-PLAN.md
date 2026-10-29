@@ -127,6 +127,25 @@ stay on the palmtop for a DTB round under its own plan. Stop: either
 regulator missing (an older DTB), or the marker present (remove it, and say
 so here).
 
+**H1 ran (2026-10-29 14:30 local, over SSH, no hands).** Release
+`7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`, the `otg_boost`
+symbol at `/soc/usi@10ca00c0/i2c@10ca0000/regulator@5b`, both regulators
+(`otg-boost`, `chgin-otg`), `/dev/i2c-19` to `-21`. The DTB dead-man: unit
+`masked-runtime`, marker absent, and its log's last armed boot (10-28
+13:48) ends "gadget configured at 1s: keeping this DTB", no "wrote the good
+DTB image" line: it never fired on 10-28. Disabled now (`systemctl disable
+tegu-dtb-deadman`; the files stay).
+
+**H2 ran (the same session).** `omamobile-tegu-otg-bringup.conf` blacklists
+the boost module; `updates/otg/` holds the #124 charger (`e5a4c78e`) and,
+instead of the plan's `597a2251` boost, the reworked boost of #127 at
+`6c5d97e18` (the watchdog kept and serviced; without the PMIC lines in the
+running DTB it falls back to its kernel timer), the old files kept as
+`*.before-h2`; `updates/gpio/` holds #139's `gpio-max77779.ko` for H2b;
+`depmod -a` run; the three helpers and the unit installed and the unit
+enabled, its marker absent. The modules are per release: after the next
+kernel push they are reinstalled.
+
 **H2. Modules and helpers for the run (risk low).** Blacklist the boost
 module, so its node can't load it before the early read: `echo "blacklist
 tegu_rt9471_boost" > /etc/modprobe.d/omamobile-tegu-otg-bringup.conf`.
