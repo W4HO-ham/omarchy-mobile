@@ -64,8 +64,13 @@ gauge's charge counter and `capacity` every 30 s across 30 minutes of
 doesn't come back on the cable within 5 minutes of the end (power key).
 
 **S2. Rails (risk low).** As S1 with the three GNSS rails and `udfps-3v3`
-not always-on (a DTB round through `push`, with slot B marked first).
-Expect: S1 minus their share.
+not always-on: the running DTB with `regulator-always-on` removed from
+LDO9S-11S and LDO15S, nothing else (a `push` of `vendor_kernel_boot` only,
+with slot B marked first; the image is built and checked to differ from the
+running one in that image alone). Expect: the four rails read disabled
+about 30 s after boot (the regulator core's unused-rail cleanup), then S1
+minus their share. GPS and fingerprint don't work in this round. Rollback:
+push the running DTB's image back.
 
 ## Not known yet
 
