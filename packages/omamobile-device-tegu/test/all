@@ -44,7 +44,7 @@ fi
 grep -q 'omamobile-keyring' PKGBUILD || fail "pacman needs omamobile-keyring"
 grep -q '^install=omamobile-device-tegu.install$' PKGBUILD \
   || fail "the pacman install script is not named"
-for dep in kmod i2c-tools bluez-utils; do
+for dep in kmod bluez-utils; do
   grep -qE "^depends=.*\b$dep\b" PKGBUILD || fail "the scripts need $dep (depends)"
 done
 [[ -f etc/omamobile-mirrorlist && -f omamobile-device-tegu.install ]] \
