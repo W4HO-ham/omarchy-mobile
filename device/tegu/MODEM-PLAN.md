@@ -8,7 +8,9 @@ trains Gen1 x1 and enumerates as 144d:a5a5; M3-M5 passed: CPIF and cbd
 boot it to **ONLINE** (Gen3 x2) with working IPC (pktproc), no SIM yet;
 G1-G2 passed: gnssd loads Kepler's firmware and talks CHPP over SPI;
 G3 partial: our HAL client starts sessions, but Kepler's core faults at
-engine start. Next: a stock GNSS capture, IOCC, the SIM.
+every engine start, with the RF rails on (2026-10-28) and with the AoC told
+the GNSS type (2026-10-28, evening) alike. Next: `strace` gnssd across an
+engine start, a stock GNSS capture, IOCC, the SIM.
 The staged plan (sections F, K, U and runbooks M0.2-M6, G1-G4) is below,
 with each step's results under it. Kernel branches `omamobile-tegu-modem` and `omamobile-tegu-gnssif`
 (section K).
@@ -547,6 +549,55 @@ startNmea 25; callbacks location 4, NMEA 5).
   omamobile-modem 0.1.7 runs gnssd as an optional daemon, so its exit no
   longer stops the profile. Until M6 qualifies the power-off, don't stop the
   modem profile by hand; reboot with someone at the palmtop.
+- **gnssd's custom GNSS library (2026-10-28, omamobile-modem 0.1.8).** An
+  `strace` of gnssd found two gaps. gps.cfg sets
+  `GlueLayer_IsUseCustomGnssLib=1`, and gnssd `dlopen()`s
+  `/vendor/lib64/libcustomgnss.so` (ENOENT), which waits for the CP at
+  `/sys/bus/platform/devices/cpif/modem_state` and then `dlopen()`s
+  `libsitril-gps.so`, which uses `libsitril-client.so` (RIL's GPS channel,
+  over binder to the radioExternal HAL). Nothing links the three, so the
+  extractor never copied them; they are `VENDOR_LIBS` of the tegu modem
+  profile now, and the chroot binds cpif at its bus path too. With both,
+  libcustomgnss logs "Modem state ONLINE"; `GpsOpen()` still fails (no
+  radioExternal HAL in the chroot: no binder), and Kepler still faults at
+  every engine start. A re-run of the extractor on the BP3A factory image
+  (2026-10-29) resolves everything: 195 files against 188, the three
+  libraries plus libbinder, libbinder_ndk, libapexsupport and the
+  radioExternal NDK library, nothing new to stub. **An existing 9a chroot
+  gets the libraries only when its owner re-extracts** (`tools/extract-vendor-chroot
+  -p modem -d tegu` on the factory image, then the install line from its
+  usage text); a chroot from before 0.1.8 keeps running without them, as
+  before. The second `/sys` bind is in every phone's modem profile and is
+  harmless on the 7 Pro and the 6 Pro: cbd never looks there.
+
+### G3, third try: rails on (2026-10-28, `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`, round ps1 DTB with ldo9s-11s on)
+
+[V] With LDO9S-11S on, Kepler loads, reaches OPERATIONAL and no longer
+logs "FCAL Part 1 is not done yet": the RF front end calibrates now. The
+gnss-slsi HAL and our client start a session (capabilities 0xe7df, start
+and startNmea ok, status SESSION_BEGIN then ENGINE_ON), but every engine
+start still ends in the same fault: "KEP M7 HARDFAULT ... LR,PC 600B5B39
+0000062C" (16 times in 10 minutes, ENGINE_ON/ENGINE_OFF each time), no
+NMEA. So the rails were one missing piece, not the fault itself. Indoor or
+outdoor doesn't matter yet: the engine crashes before it searches.
+The G3 script's HARDFAULT count missed these (gnssd wrote them outside its
+window).
+
+### G3, fourth try: the AoC told the GNSS type (2026-10-28, evening, gn3 DTB)
+
+[V] With `&aoc { gnss-type = <2>; }` (kAOCGnssType, as Google's
+`zumapro-phone-ignss.dtsi`), Kepler loads, goes OPERATIONAL, and the
+gnss-slsi HAL and our client start a session (startNmea ok, "the HAL asks
+for a location"). But every engine start still ends in the same "KEP M7
+HARDFAULT ... LR,PC 600B5B39 0000062C" (20 in 4 minutes), so the type isn't
+it. In the register dump, R3 = 0x62D and PC = 0x62C: the M7 jumped
+through a function pointer holding 0x62D, a Thumb address near zero, which
+looks like an entry nobody filled in. Other leads from the logs:
+`aiding_timemark_reader_thread: open() errno:2` (gnssd can't open its
+time-mark device), `TGT_MEMS initInterface: fromBinder() failed` (the HAL's
+sensor service is missing), and `libsighandler.so` not found. Next, attended
+and on the charger, with the modem up: `strace -f` gnssd across one engine start, to see which
+files and devices it opens or fails to open (observation only).
 
 ### Suspend with the modem on (2026-10-27, early morning, same kernel)
 

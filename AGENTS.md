@@ -31,13 +31,13 @@ Omarchy Mobile runs native Omarchy (Arch Linux ARM, Hyprland, Omarchy's packages
 ## 2. Workflow
 
 - **Read before you touch anything:**
-  1. the subsystem's plan in `device/<codename>/*-PLAN.md`: its status line names the kernel branch, the worktree (`~/android/mainline/wt-<subsystem>`) and the output directory (`out-<subsystem>`);
+  1. the subsystem's plan in `device/<codename>/*-PLAN.md`: its status line names the kernel branch, the worktree (`~/omamobile-kernel/wt-<subsystem>`) and the output directory (`out-<subsystem>`);
   2. the newest entries in [NOTES.md](device/cheetah/NOTES.md);
   3. the gotchas below.
 
   Plans record what already failed and why.
 - **Work offline and hand the human a runbook.** Write the code, build it, and run checkpatch, `W=1` and `dt-validate` yourself. Then add a gated runbook to the plan: the commands, Expect/Pass, a **stop condition**, a Rollback and a risk level for each step, read-only steps first. The human runs or approves each step. Record the results in the plan with the date and the kernel release (`uname -r`).
-- **Build with an explicit worktree and output directory:** `KERNEL_DIR=~/android/mainline/wt-X KERNEL_OUT=~/android/mainline/out-X bin/omamobile kernel`. Other agents build in parallel, and a shared output directory mixes their builds.
+- **Build with an explicit worktree and output directory:** `KERNEL_DIR=~/omamobile-kernel/wt-X KERNEL_OUT=~/omamobile-kernel/out-X bin/omamobile kernel`. Other agents build in parallel, and a shared output directory mixes their builds. On setups from before 2026-10-29 the kernel tree is `~/android/mainline`: use whichever exists (the tools find either).
 - **Kernel branches:** one subsystem per branch (`omamobile-<subsystem>`). The human merges branches into the local integration branch `omamobile-int` that the phone runs. Curated, upstream-ready commits go to `omamobile`, the branch published to GitHub. Don't rebase or force-push branches someone else is merging from.
 - **Commit messages:**
   - Kernel commits are upstream-style: the subsystem prefix from `git log --oneline <file>`, the why, and the evidence. AI agents never add `Signed-off-by:` (`Documentation/process/coding-assistants.rst`): the human signs off.
@@ -101,6 +101,7 @@ tools/phone-ssh CMD    -> run anything; stream files with  ssh 'cat > f' < f
 | `tools/install-phone` | The installer: fastboot checks, the owner's answers into a local image copy, then only slot B's images and `userdata`. Asks the human to type the codename; `--dry-run` first. Never run it without the human's go |
 | `tools/phone-provision` | After a fresh install: Google's files from the user's factory image and the phone's own data from the backup. `--fingerprint` copies Trusty's state but never starts the service |
 | `tools/build-packages`, `tools/repo-push` | Maintainer only: the signed `[omamobile]` repository, built on the laptop with no phone (needs `keys/`, never committed); the release key's layout is in [RELEASES](docs/RELEASES.md) §10 (`tools/release-key-init`, run once); `tools/repo-publish` publishes to `pkgs.omamobile.org` (development daily from `origin/main`, stable on the maintainer's go). `tools/repo-build` builds on a connected phone instead: an opt-in shortcut for Mesa, Hyprland and libcamera, never a requirement |
+| `tools/local-key-init`, `tools/fetch-published`, `--local` | A contributor's port: its own packages signed with a local key in `keys/<codename>/`, the project's published packages fetched with their signatures checked, everything under `out/<codename>/` (RELEASES §10, review lesson L-7). Never the maintainer's `keys/` or `out/repo` |
 | `tools/publish-kernel` | Maintainer only: publish `omamobile` to GitHub on a squashed upstream base |
 
 Logs from these tools land in `logs/` (gitignored). Quote the relevant lines in the plan, not whole logs, and check them for identifiers first.
@@ -216,5 +217,5 @@ Each entry gives the gotcha, then the reason or the fix. Details are in the link
 | `packages/omamobile-shell`, `-sensors`, `-gnss`, `-audio`, `-fingerprint`, `-modem` (chroot profile), `libfprint`, `neard`, `mesa`, `hyprland`, `omamobile-keyring` | Userspace packages |
 | `packages/omamobile-omarchy/patches/` (`patches/omarchy/` links there) | Omarchy changes waiting to land upstream, re-applied after every Omarchy upgrade |
 | `docs/DEVICES.md` | Supported-devices matrix |
-| `~/android/mainline/wt-*`, `out-*` | Kernel worktrees and build outputs (outside the repo) |
+| `~/omamobile-kernel/linux`, `wt-*`, `out-*` | The kernel clone, its worktrees and build outputs (outside the repo; `~/android/mainline` on older setups) |
 | `~/android/reference/` | Stock captures and partition backups: private, never committed |
