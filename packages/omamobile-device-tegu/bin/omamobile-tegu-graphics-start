@@ -86,6 +86,12 @@ bound "$gpu" panthor 60 || fail "the GPU did not bind to panthor"
 phase display
 modprobe gs_decon stage=2 fbdev=0 || fail "gs_decon failed"
 bound "$decon" gs-decon 60 || fail "the display controller did not bind to gs-decon"
+# The session's environment (uwsm/env) reads these: the display controller's
+# DRM node, whichever card number it got, and that the GPU is up.
+mkdir -p "$root/run"
+card=$(readlink -f "$root/dev/dri/by-path/platform-19470000.display-controller-card" 2>/dev/null || true)
+[[ -n $card ]] && printf '%s\n' "${card#"$root"}" > "$root/run/omamobile-tegu-display-card"
+printf '{"gpu": "panthor", "by": "omamobile-tegu-graphics-start"}\n' > "$root/run/omamobile-tegu-gpu-ready.json"
 up="GPU, display"
 
 if enabled "$haptics_node"; then
