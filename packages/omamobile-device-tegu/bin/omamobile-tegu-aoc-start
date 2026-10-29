@@ -1,8 +1,9 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
 # Boot the Pixel 9a's AoC (audio and sensor DSP), hang-safe, in the order
-# the bring-up proved (omamobile-tegu-audio-up, docs/HANDOFF.md S5) and the
-# Pixel 7 Pro's omamobile-aoc-start uses:
+# the bring-up proved on the palmtop (its omamobile-tegu-audio-up, still
+# outside the package; device/tegu/NOTES.md 2026-10-26) and the Pixel 7
+# Pro's omamobile-aoc-start uses:
 #   1. Trusty (trusty_core, trusty_log, trusty_ipc, then trusty_virtio):
 #      the AoC is started by Trusty's hwmgr.aoc service.
 #   2. The GSA mailbox (gsa), which authenticates the image.
@@ -17,8 +18,9 @@
 # This waits for a kernel whose device tree enables the AoC, GSA and Trusty
 # nodes: today they are turned on by out-of-tree overlay modules that no
 # package can ship, so the unit has no wants link (README.md).
-# A marker is written and synced before any of it, and removed at the end.
-# If a boot hangs here, the next one finds the marker and leaves the AoC off;
+# A marker is written and synced before any of it, and removed at the end,
+# after a step that returned and failed too (that is not a hang). If a boot
+# hangs here, the next one finds the marker and leaves the AoC off;
 # "omamobile-tegu-aoc-start --retry" tries again.
 #   omamobile-tegu-aoc-start [--retry]
 set -uo pipefail

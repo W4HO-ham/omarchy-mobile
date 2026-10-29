@@ -28,6 +28,10 @@ packaged yet. What is here is what runs on in-tree drivers.
 | `src/reboot-to.c` | `/usr/bin/reboot-to` | Reboot with a reason the bootloader understands. One source with the cheetah package |
 | `device.conf`, `etc/omamobile-mirrorlist` | `/usr/share/omamobile`, `/etc/pacman.d` | The device descriptor (a copy of `device/tegu/device.conf`) and the `[omamobile]` repository |
 
+Bluetooth comes up powered at every boot, as on the Pixel 7 Pro
+(`omamobile-bt-addr@` powers the controller on to set its address, and
+leaves it on).
+
 `./build [DIR]` compiles the C tools, `./install DESTDIR [DIR]` stages
 everything and enables nothing beyond the two wants links, and `test/all`
 runs the package tests in a scratch root (`OMAMOBILE_TEGU_ROOT`), with no
@@ -58,6 +62,11 @@ take over, `/chosen/bootargs` has to lose:
 `cs40l26_vibra.max_buzz_ms=100` stay. Whether and when that DTB change
 happens is the owner's call.
 
+`s3c2410_wdt.tmr_atboot=1` is what resets the palmtop after a hang: the
+watchdog runs from boot, so a hung graphics start ends in a reset and the
+marker. The public tegu DTS carries `panic=10` but not that, so on it a
+hang that does not panic ends at the power key (held about 30 s).
+
 ## The AoC start ships disabled
 
 `omamobile-tegu-aoc-start` is the Pixel 7 Pro's AoC start with the 9a's
@@ -66,8 +75,10 @@ channel through `aoc_channel_dev`). It needs a kernel whose device tree
 enables the AoC, GSA and Trusty nodes; today the bring-up turns them on
 with out-of-tree overlay modules, and so `omamobile-tegu-aoc.service` has
 no wants link. Once a kernel enables them, `systemctl enable
-omamobile-tegu-aoc.service` and reboot; a failed start names the step in
-the journal and the marker, and the next boot leaves the AoC off until
+omamobile-tegu-aoc.service` and reboot. A step that returns and fails is
+named in the journal and clears the marker (a load that came back is not a
+hang; `test/aoc-start` checks this). Only a boot that hangs in the start
+leaves the marker, and then the next boot leaves the AoC off until
 `omamobile-tegu-aoc-start --retry`.
 
 ## Firmware the phone needs
@@ -126,5 +137,9 @@ and a leftover copy in `/etc` wins over the package's file of the same name.
 `omamobile-tegu-audio-up`, `omamobile-tegu-modem-up` and the out-of-tree
 modules they load stay until the kernel carries their drivers and device
 tree nodes; the package's guards and theirs do not load the same modules.
+So when a smoke report from the palmtop (`tools/phone-smoke`) lists Wi-Fi
+and NFC as loaded beside this package, it was `omamobile-tegu-audio-up`
+that loaded them, from its own staged copies, not the package: the package
+blacklists both and starts neither.
 
 Licence: MIT.
