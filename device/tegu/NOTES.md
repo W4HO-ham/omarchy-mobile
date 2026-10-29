@@ -43,8 +43,11 @@ initramfs, with a readback hash and a read-only `e2fsck`. B was then on its
 last try (byte 0x34 `00` in the "before" row below): one more unmarked
 reboot would have fallen back again.
 
-**2026-10-28.** The same kernel, with a new DTB (the TCPC as a dual-role
-port with a link to dwc3's role switch). In the morning, slot B was
+**2026-10-28.** Kernel `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`
+(the release the day's run kit records; the string stays the same across
+that tree's builds, so it names the tree, not one build) with our initramfs
+(`bin/omamobile initramfs`, `initramfs/init`, packed by the kit), and a new
+DTB (the TCPC as a dual-role port with a link to dwc3's role switch). In the morning, slot B was
 written by `omamobile flash`, recovering from a test boot of kernel #55's
 head that hung on the Google logo, and it was **not marked** afterwards.
 Every `push` round after that ran unmarked, so the tries ran out on the
