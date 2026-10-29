@@ -179,11 +179,14 @@ One boot before H3, with the boost module still blacklisted from H2:
    `tegu-rt9471-boost.ko`, W=1 clean) over `updates/gpio/` and
    `updates/otg/`, keeping the old boost module as `*.before-h2b`, then
    `depmod -a`.
-2. Push the DTB built from #127 at `5ada9ab0f` (sha256 `c8b3ea8b…`, the
-   same build that answered the node comparison above plus the PMIC node),
-   the way the 10-28 ot7 DTB went on: the kit's `omamobile images` with
-   that DTB as the base and `omamobile push`. Slot B stays marked; the push
-   writes only the `_b` images.
+2. Push gn3 plus `device/tegu/overlays/usb-host-pmic.dtso` (the PMIC node on
+   hsi2c6 with gpa8-0 pinned as stock's `if_pmic_irq`, and the boost's
+   `int-gpios`/`enable-gpios`: the same nodes as #127 at `5ada9ab0f`, as an
+   overlay, because the #127 DTB itself can't take the kit's other overlays;
+   a dry pack on 10-29 applied it and the overlaid tree carries all three
+   pieces). Added to the kit's `DTB_OVERLAYS` after `package-startup`, then
+   `omamobile images` twice and `omamobile push`. Slot B stays marked; the
+   push writes only the `_b` images.
 3. Reboot with kmsg streamed. Expect: `max77779-pmic 24-0066: MAX77779 PMIC
    revision 0x02` with no "no interrupt line" message, the line in
    `/proc/interrupts` (`24-0066` on gpa8-0) at a count that stays put, the
