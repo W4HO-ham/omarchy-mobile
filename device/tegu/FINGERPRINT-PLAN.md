@@ -573,10 +573,12 @@ needs them.
   to parse refresh rate"). With all three fixed, enrollment completes and
   authenticate captures come back GOOD and reach the matcher, but every one
   is NOMATCH at `image_quality` 15-26, at screen brightness 1500 and 3628
-  alike. Open leads: Google picks the overdrive group from the luminance
-  under the circle and restores the normal bands at a second stage
-  (`tg4c_set_local_hbm_brightness(ctx, false)`), where the port always uses
-  group 0; whether the circle reaches LHBM luminance at all (nobody has yet
+  alike. Lead one: Google overdrives only the first stage. After the
+  effective delay (2 frames, 3 with IRC off) `tg4c_set_local_hbm_mode_post`
+  writes the normal bands, so stock captures under the normal circle, while
+  the port kept overdrive group 0 the whole time. From 2026-10-29 the
+  palmtop runs `lhbm_od=4` (the normal bands, read from the panel), and the
+  next step is to re-enroll and match under it. Other leads: whether the circle reaches LHBM luminance at all (nobody has yet
   compared it with the shell's drawn target); the HAL's raw capture dump
   (`vendor.gf.debug.dump_data=1` wrote nothing). Many misses lock the sensor
   out (`LOCKOUT -1`); `omamobile-fp-ctl resetlockout` clears it.
