@@ -759,7 +759,7 @@ So with the clock and the cut right, what is left is one byte per back-to-back c
 
 **The night's test code and the partition check** (the maintainer's points 4 and 5 on #138):
 - bring-up branch: <to be linked> (the `gnss_spi.ko` builds with the `fb_delay`, `realign`, `rx_cpha`, `hold`, `osc` and `div` parameters, the module that registered `pdma1` and ran the PL330 memcpy, the module that set USI3's mux and divider behind the clock framework, the per-transfer `spi->mode` switch, the DTBs with the `pdma1` node and with auto CS, and how each test DTB reached slot B).
-- partition check: <to be recorded> (`efs`, `efs_backup`, `modem_userdata` and `persist` against the backup, as M0.1, after the night's sessions and resets).
+- partition check (2026-10-29 10:20, after the night's sessions and resets, release `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`): `efs`, `efs_backup`, `modem_userdata`, `persist`, `modem_a` and `modem_b`, each found by `PARTNAME` and read with `sha256sum` only, all match the 10-28 read-only backup (`tegu-protected-post-android-20261028T174253Z`, off-repo), all `ro=1`, none mounted. The night's test DTBs reached slot B through `bin/omamobile push` (the kit's `repo-push`: `dd` into the `_b` partitions, sha256-verified, then `reboot-to omamobile`), never through fastboot.
 
 **Parked (2026-10-29, the owner's decision):** no logic analyzer, and no more module-level guessing. The two kernel changes stay (kernel PR #135); the as-ported gnssif and gnss_spi run on the palmtop. GNSS resumes when either a stock capture of SPI21's timing or a new idea about the first byte of a back-to-back block turns up.
 
