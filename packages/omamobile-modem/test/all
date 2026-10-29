@@ -114,6 +114,18 @@ out=$(RUN=$t CBD_ATTEMPTS=1 bash -c '
 [[ ! -e $t/cbd.pid ]] || fail "cbd pid file removed"
 pass "cbd stopped after its first failed boot"
 
+# a second start in the same boot is refused: the marker outlives the profile
+once=$t/once; mkdir -p "$once"
+out=$(OMAMOBILE_MODEM_BOOT_MARK=$once/profile-started bash -c '
+  die() { echo "die: $*"; exit 7; }
+  eval "$(sed -n "/^modem_once_per_boot() {$/,/^}$/p" profiles/modem.conf)"
+  modem_once_per_boot && echo first-ok
+  modem_once_per_boot; echo "rc=$?"' 2>&1) || true
+[[ $out == *first-ok* && $out == *"die: the modem profile already started this boot"* && $out != *"rc=0"* ]] ||
+  fail "a second start in the same boot is refused: $out"
+[[ -s $once/profile-started ]] || fail "the once-per-boot marker is written"
+pass "a second profile start in the same boot is refused"
+
 # The board id is required (M4.1g/h): the check refuses a missing or empty
 # ro.boot.cdt_hwid and a persist copy that differs. Made-up values only.
 cdt() { bash -c 'say() { :; }; eval "$(sed -n "/^modem_cdt_check() {/,/^}/p" profiles/modem.conf)"; modem_cdt_check "$1"' _ "$1"; }
