@@ -11,7 +11,8 @@ derekross/linux-omarchy-mobile#127 (`tegu-usb-host-bringup`, now at
 `5ada9ab0f`, not for merge: after the `5dd15e31c` the DTB comparison below
 used, `0caff021a` only changed a comment, `6c5d97e18` reworks the boost
 driver and `5ada9ab0f` adds the PMIC node and the boost's lines; H2b boots
-that build). The boot helpers are in `device/tegu/usb-host/`.
+gn3 plus the overlay below, `usb-host-pmic.dtso`, not #127's DTB). The boot
+helpers are in `device/tegu/usb-host/`.
 
 ## What it builds on
 
@@ -19,7 +20,7 @@ that build). The boot helpers are in `device/tegu/usb-host/`.
 | --- | --- |
 | Board DT: fuel gauge, TCPC node | derekross/linux-omarchy-mobile#119 |
 | `usi10`/`hsi2c10`, its pins, the RT9470 node, the TCPC as dual-role with `vbus-supply`, the graph to dwc3 | #127 (USI10 clocks: #102, merged) |
-| RT9470 OTG boost module (`tegu-rt9471-boost`) | #127. JEITA and the watchdog are off only while the boost is enabled |
+| RT9470 OTG boost module (`tegu-rt9471-boost`) | #127. Since `6c5d97e18` (the #131 follow-up) the driver keeps the RT9470's 40 s watchdog and services it from the PMIC interrupt, or from a 20 s kernel timer without it, as stock does, instead of clearing it; JEITA is off only while the boost is enabled |
 | MAX77779 charger and its `chgin-otg` regulator | #92, #124 (head `4970bcdc3820`) |
 | MAX77779 TCPC in `tcpci_maxim` | #97 (merged) |
 | eUSB2 repeater, PHY | #118, the integration tree |
@@ -37,8 +38,9 @@ build is the reference. For this run to count as #124's evidence, gn3's
 `chgin-otg` regulator), `i2c@10ca0000` (hsi2c10, the boost at 0x5b) and
 `usb@11210000` nodes were compared with a build of #127 at `5dd15e31c`
 (both decompiled with `dtc -I dtb -O dts`; the result is below, "The three
-nodes against #127"). The next run boots no new DTB until H2b, and needs
-no DTB dead-man.
+nodes against #127"). The next run boots no new DTB until H2b. H2b pushes
+gn3 plus one overlay to slot B through the normal `push` path, without a
+DTB dead-man; its way back when SSH doesn't return is written into H2b.
 
 The `tegu-dtb-deadman` used on 10-28 was a one-boot unit: if the gadget
 wasn't configured 180 s into an armed boot, it wrote a known-good
@@ -84,8 +86,9 @@ point 7); they need a hand on the cable.
 Forced restart if the palmtop hangs, also in a shutdown under the swap timer:
 hold Power about 30 s until it is off, then press Power. Stop the run if slot
 B isn't marked successful: this runbook doesn't mark it (marking is a separate
-`devinfo` operation under the rules being settled on #125), and nothing here
-writes a boot partition.
+`devinfo` operation under the rules being settled on #125). The one
+boot-partition write here is H2b's `omamobile push` of gn3 plus the overlay
+to slot B's images, through the normal path; nothing else writes one.
 
 **The meter rule.** Any reset while the drive is attached is a crash with
 host mode on: H5's `echo b`, H4's swap timer firing, or a forced restart
@@ -165,8 +168,8 @@ says `enabled`, and the unit does nothing yet (its marker is absent until H5
 arms it). Rollback: put the `*.before-h2` files back, `depmod -a`, and H6's
 removal of the helpers.
 
-**H2b. The PMIC block and the boost's lines (risk low; attended, on the
-charger).** New since the 10-29 review: the RT9470's interrupt and chip
+**H2b. The PMIC block and the boost's interrupt line (risk medium: its
+rollback can end in fastboot; attended, on the charger).** New since the 10-29 review: the RT9470's interrupt and chip
 enable are the MAX77779's SGPIO6 and SGPIO7, and stock services the boost's
 40 s watchdog from that interrupt. #127 now carries the PMIC block on the
 board (`5ada9ab0f`, with its gpa8-0 line pinned as stock's `if_pmic_irq`)
@@ -174,19 +177,27 @@ and the boost reworked to keep the watchdog and kick it from the interrupt
 (`6c5d97e18`); the block's driver is linux-omarchy-mobile#139 (`a6e10f2ba`).
 One boot before H3, with the boost module still blacklisted from H2:
 
-1. Stage the modules built against the running kernel from
-   `logs/tegu-review-20261029/max77779/` (`gpio-max77779.ko` and the new
-   `tegu-rt9471-boost.ko`, W=1 clean) over `updates/gpio/` and
-   `updates/otg/`, keeping the old boost module as `*.before-h2b`, then
-   `depmod -a`.
+1. Modules: already done by H2, which installed #139's driver
+   (`gpio-max77779.ko`) and the boost built from `6c5d97e18`
+   (`tegu-rt9471-boost.ko`, W=1 clean) over `updates/gpio/` and
+   `updates/otg/`; `5ada9ab0f` only changes the device tree, so nothing is
+   staged for this step. After a kernel push they are rebuilt and
+   reinstalled as H2 says.
 2. Push gn3 plus `device/tegu/overlays/usb-host-pmic.dtso` (the PMIC node on
    hsi2c6 with gpa8-0 pinned as stock's `if_pmic_irq`, and the boost's
-   `int-gpios`/`enable-gpios`: the same nodes as #127 at `5ada9ab0f`, as an
-   overlay, because the #127 DTB itself can't take the kit's other overlays;
-   a dry pack on 10-29 applied it and the overlaid tree carries all three
-   pieces). Added to the kit's `DTB_OVERLAYS` after `package-startup`, then
-   `omamobile images` twice and `omamobile push`. Slot B stays marked; the
-   push writes only the `_b` images.
+   `int-gpios` on SGPIO6: the PMIC node and the pin of #127 at `5ada9ab0f`,
+   as an overlay, because the #127 DTB itself can't take the kit's other
+   overlays; a dry pack on 10-29 applied it). The overlay does not give the
+   boost its `enable-gpios`: SGPIO7 is the RT9470's charge enable (mainline's
+   `richtek,rt9471.yaml`: the GPIO that turns charging on and off), and
+   with the pin driven low the chip could start charging the battery at its
+   power-on defaults beside the MAX77779, with nothing managing it (the
+   10-29 readout had `FUNCTION` 0x41, `CHG_EN` set, with the pin undriven).
+   That line stays with #127, which must clear `CHG_EN` before taking it,
+   or not take it; this boot tests one thing, the PMIC block and the boost's
+   interrupt. Added to the kit's `DTB_OVERLAYS` after `package-startup`,
+   then `omamobile images` twice and `omamobile push`. Slot B stays marked;
+   the push writes only the `_b` images.
 3. Reboot with kmsg streamed. Expect: `max77779-pmic 24-0066: MAX77779 PMIC
    revision 0x02` with no "no interrupt line" message, the line in
    `/proc/interrupts` (`24-0066` on gpa8-0) at a count that stays put, the
@@ -194,13 +205,25 @@ One boot before H3, with the boost module still blacklisted from H2:
    hand with kmsg streamed. Expect: `JEITA off, watchdog on (0x1)` as stock
    leaves it, `watchdog serviced from interrupt N`, and the regmap readout
    of the PMIC (`/sys/kernel/debug/regmap/24-0066/registers`) with SGPIO6
-   now an input with `PU` set and `PD` clear and its DATA high, SGPIO7 an
-   output driving low (CEB asserted). Stop: an interrupt count on gpa8-0
-   or on the SGPIO line that climbs by more than 100 a second (a pull
-   wrong; `rmmod tegu_rt9471_boost` and read the PMIC's `e9`/`ea`), the
-   boost probing without the interrupt, or no SSH 3 minutes after the
-   reboot (forced restart with the laptop attached). Rollback: the previous
-   DTB pushed back and the `*.before-h2b` module restored, `depmod -a`.
+   now an input with `PU` set and `PD` clear and its DATA high, SGPIO7
+   still off (CNFG7 0x00: nothing drives the enable). Then read the boost
+   as the H4 script does, `i2cget -f -y <hsi2c10 bus> 0x5b 0x02`
+   (`FUNCTION`) and `0x0f` (ICSTAT): expect `FUNCTION` 0x41 as on 10-29
+   and ICSTAT 0xf1, VBUS ready and not charging. Stop: ICSTAT showing
+   charging (anything but the not-charging value): `rmmod
+   tegu_rt9471_boost`, read both again, and record them; an interrupt
+   count on gpa8-0 or on the SGPIO line that climbs by more than 100 a
+   second (a pull wrong; `rmmod tegu_rt9471_boost` and read the PMIC's
+   `e9`/`ea`); the boost probing without the interrupt; or no SSH 3 minutes
+   after the reboot. On that last one: a forced restart with the laptop
+   attached (slot B is marked, so ABL boots the same DTB again). If SSH
+   doesn't come back after the forced restart either, go to fastboot by the
+   buttons (Volume Down + Power held about 20 s) and stop there: pushing
+   the previous DTB back needs the SSH that is missing, and the way back
+   from fastboot is `omamobile flash`, which unmarks slot B (#125), so ask
+   Derek before any `flash`. Rollback while SSH works: the previous DTB
+   pushed back (the kit restored, `omamobile images` twice, `omamobile
+   push`); the modules stay as H2 left them.
 
 Read-only before the step, for the record: the PMIC's registers as the
 driver found them on 10-29 without the node (ID 0x79, revision 0x02, OTP
@@ -256,7 +279,8 @@ enumerated; 20 s after the drive enumerates it logs the boost's state to
 `/var/log/omamobile/usb-host-h5.log`, syncs, and runs `echo b >
 /proc/sysrq-trigger`. On every exit without a reset (no drive in 3 minutes,
 the laptop never leaving, the sysrq not taking) it removes the `armed`
-marker, so a fallback reboot (the swap timer firing first, a `systemctl
+marker, and it traps `TERM` to do the same, so a fallback reboot (the swap
+timer firing while it still waits, which stops the unit; a `systemctl
 reboot` with the charger's `.shutdown`) doesn't produce an early-read log
 under the same name. **The early read counts only when `usb-host-h5.log`
 ends with the "resetting now" line.** `systemctl reboot` would run the
@@ -318,6 +342,10 @@ installed in H2, unless H2's rollback is wanted.
 - The RT9470's lines in stock's DT (10-29, `zumapro-buck-charge-rt9471.dtsi`
   and `zuma-tegu-charging.dtsi` in Google's tegu tree): interrupt on the
   MAX77779's sGPIO 6 (`PLC_INT_L`), chip enable on sGPIO 7, and stock's
-  driver services the 40 s watchdog from that interrupt. Our kernel has no
-  MAX77779 sGPIO driver yet, which is why the bring-up node has no
-  interrupt and the boost runs with the watchdog off.
+  driver services the 40 s watchdog from that interrupt. Until 10-29 our
+  kernel had no MAX77779 sGPIO driver, so the bring-up node had no
+  interrupt and the boost ran with the watchdog off. Now the reworked boost
+  driver on derekross/linux-omarchy-mobile#127 (`6c5d97e18`) keeps the
+  RT9470's watchdog and services it from the interrupt, or from a 20 s
+  timer when the node has none, as stock does, instead of clearing it
+  (the follow-up Derek asked for on #131); the sGPIO driver is #139.

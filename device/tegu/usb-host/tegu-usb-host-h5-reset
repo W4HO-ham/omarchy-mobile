@@ -9,9 +9,10 @@
 # tegu-rt9470-early-read shows what a reset leaves with host mode on. It
 # refuses to reset unless that read is armed and its unit enabled, and
 # unless a drive has enumerated: without them the reset would show nothing.
-# On every exit without a reset it removes the armed marker, so a fallback
-# reboot (the swap timer, a systemctl reboot) doesn't produce an early-read
-# log that looks like this step's. The early read counts only when this
+# On every exit without a reset it removes the armed marker, and it traps
+# TERM to do the same (the swap timer's reboot stops this unit first), so a
+# fallback reboot (the swap timer, a systemctl reboot) doesn't produce an
+# early-read log that looks like this step's. The early read counts only when this
 # script's log ends with the "resetting now" line.
 # Reads are i2cget only; the writes are the marker's removal and the sysrq.
 set -u
@@ -19,6 +20,7 @@ L=/var/log/omamobile/usb-host-h5.log; mkdir -p /var/log/omamobile
 A=/var/lib/omamobile-tegu/rt9470-early-read/armed
 log() { echo "$(date -Is) $*" >> "$L"; }
 disarm() { rm -f "$A"; sync; log "no reset: early read disarmed ($A removed)"; }
+trap 'disarm; exit 1' TERM
 bus_of() { local d; for d in /sys/bus/i2c/devices/i2c-*; do readlink -f "$d" | grep -c "$1" >/dev/null && { echo "${d##*-}"; return; }; done; }
 CB=$(bus_of 108d0000.i2c)   # hsi2c6: the TCPC at 0x25, the charger at 0x69
 RB=$(bus_of 10ca0000.i2c)   # hsi2c10: the RT9470 at 0x5b
