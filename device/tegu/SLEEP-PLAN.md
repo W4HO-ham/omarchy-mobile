@@ -253,6 +253,33 @@ with the cable in.
   press, then the same with the module: if the key wakes only without it,
   the module is in the no-wake story after all (a key wake that doesn't
   register would look exactly like an RTC alarm that doesn't).
+- **Found the same afternoon: UFS failed to come back from an s2idle, and
+  that is what a "no-wake" looks like from outside.** The forced 10-minute
+  systemd sleep above (cable in, module loaded) did wake on its RTC alarm
+  at uptime 10801 s, but the UFS link did not come back: the console in
+  pstore shows `exynos-ufshc 13200000.ufs: link startup failed 1` and
+  `ufshcd_host_reset_and_restore: Host init failed 1` five times in a row,
+  then `ufshcd_wl_resume failed: 1`, `PM: failed to resume async: error 1`,
+  and from the first write after resume `I/O error, dev sda` with
+  `hostbyte=0x07`, `EXT4-fs … failed to convert unwritten extents …
+  potential data loss`, and the root filesystem went `emergency_ro`. The
+  palmtop answered SSH for a while from what was already in memory, but
+  nothing on disk could be read: `systemctl suspend` and `systemctl
+  reboot` did nothing, `coredumpctl` and `df` returned EIO, the power key
+  reached the kernel (its interrupt count rose) and the shell could not
+  light the screen. A sysrq `b` reset brought it back with a clean ext4
+  journal recovery (`spm_lvl` was 5 throughout, `rpm_lvl` 3). So a
+  palmtop that "never wakes" and whose power key does nothing may have
+  woken with its storage dead, which the three no-wake records cannot
+  distinguish from a missed alarm: none of them had a console. UFS resume
+  was qualified on 32 of 32 cycles with the reset held in suspend (kernel
+  #83) and on the S1 sleeps; this is the first failure, 1 of about 50
+  systemd-path resumes. Rule until understood: after every s2idle on the
+  9a, `dmesg | grep -E "link startup failed|Host init failed|I/O error"`
+  before anything else, and reboot at once if it matches; unattended
+  sleep stays off. Next: the UFS resume path with the kmsg stream, and the
+  question whether the three dark no-wakes left ext4 recovery lines in
+  their next boot's journal (`journalctl -b -N -k | grep EXT4`).
 - A later note on the method: `power-ab`'s CSV columns are
   `voltage_uv,current_ua,current_avg_ua,charge_counter_uah,charge_now_uah`;
   the gauge's `current_avg` is a long filter and says little about a
