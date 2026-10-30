@@ -43,11 +43,25 @@ with nothing but Bluetooth starting resets again at that time, start here.
   entry per CPU); Bluetooth, NFC and Wi-Fi cost nothing measurable at idle.
   What stays on is MIF, the buses and the always-on rails: there is no
   system idle state in our kernel. `tegu-mif-sleep.ko` (MIF 421 MHz in
-  sleep) saves about 60-75 mA and is loaded at boot by a hand unit now.
+  sleep) saves about 60-75 mA by the coulomb counter; a hand unit loaded it
+  at boot for one night and was disabled the next day (below).
   Details and method in [SLEEP-PLAN](SLEEP-PLAN.md) S1.
 - `rtcwake -m freeze` written straight to `/sys/power/state` failed to wake
-  again (the second time in two days); `systemctl suspend` after
-  `rtcwake -m no` has woken every time. Use only the systemd path.
+  again (the second time in two days); every `systemctl suspend` after
+  `rtcwake -m no` had woken up to then. The next day showed the entry
+  path isn't the whole story (the 2026-10-30 bullet).
+- 2026-10-30: the cable-out `power-ab --suspend systemd` run with the
+  module loaded never woke from its 30-minute sleep (not from the RTC, not
+  from the power key; reset by hand), so the hand unit that loaded the
+  module at boot is disabled. The same day a cable-in 30-minute systemd
+  sleep with the module, its alarm logged as armed, woke on the alarm to
+  the second, and the afternoon's repeat of the cable-out run with the
+  module loaded by hand woke too: 273 mA awake with the screen off, 260 mA
+  asleep, about 40 mA under the figure without the module. Three sleeps
+  have never woken (two direct freezes, one systemd sleep with the module)
+  and no single factor explains them, so sleep tests stay attended and the
+  module stays off at boot; the shell's nightly auto-sleep (systemd path,
+  no module) has woken every time and goes on as before.
 - The 2026-10-27 "140 mA asleep" figure doesn't hold up against 2026-10-28
   (434-445 mA cable out, as-is) and tonight; treat about 300 mA cable out
   as the baseline.

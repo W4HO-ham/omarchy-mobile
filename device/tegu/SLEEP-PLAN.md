@@ -1,8 +1,13 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Pixel 9a sleep: why s2idle drains so much
 
-Status (2026-10-29): s2idle works (RTC and power-key wakes; NFC and Wi-Fi
-have their own notes in NOTES and AGENTS), but the drain in sleep is high.
+Status (2026-10-30): s2idle works (RTC and power-key wakes; NFC and Wi-Fi
+have their own notes in NOTES and AGENTS), but the drain in sleep is high,
+and three test sleeps have never woken (two direct freezes and one
+30-minute systemd sleep with `tegu-mif-sleep` loaded; S1), so sleep tests
+are attended. The shell's nightly auto-sleep, which the palmtop runs with
+the `omamobile-sleep` toggle on and without the module, has woken every
+time and goes on.
 This plan gathers what's measured, an audit from stock's device tree and
 a read-only snapshot of the palmtop, the candidates ranked, and a
 measurement runbook.
@@ -160,9 +165,10 @@ for one. Phase A is awake with the screen off,
 phase B is the 30-minute sleep, two rounds. The 9a's gauge has no
 `charge_counter`, so the figure is the `charge_now` column of the CSV
 (column 7, `charge_now_uah`): the gauge's model-corrected remaining
-charge, coarser than a coulomb counter, hence the long phases. Repeat with
-`tegu-mif-sleep` loaded (the module commit above, built against the running
-kernel). Expect about 300 mA, then less. Stop: the palmtop doesn't come
+charge, coarser than a coulomb counter, hence the long phases. Repeat,
+attended, with `tegu-mif-sleep` loaded (the module commit above, built
+against the running kernel): that is the configuration that once didn't
+wake. Expect about 300 mA, then less. Stop: the palmtop doesn't come
 back on the cable within 5 minutes of the end (power key). Rollback:
 `rmmod tegu-mif-sleep` (the module changes nothing while awake: it sets the
 rate at suspend-prepare and puts the old one back at resume), or a reboot.
@@ -265,8 +271,8 @@ tools/phone-ssh 'i2cset -f -y 24 0x69 0xbc 0x05; systemctl stop x-buck-restore.t
 #    back: write it again; if it still doesn't, replug the charger (the chip's power-on default is 0x05).
 ```
 
-Next: S2 (the four rails), and a cable-out `power-ab` run with the module
-loaded to put a cable-out number on the MIF saving.
+Next: S2 (the four rails), attended. The cable-out number with the module
+is in (260 mA, S1 result); any further run with the module is attended too.
 
 **S2. Rails (risk low).** As S1 with the three GNSS rails and `udfps-3v3`
 not always-on: the running DTB with `regulator-always-on` removed from
