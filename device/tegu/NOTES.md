@@ -85,6 +85,15 @@ run had one thing in its way that the package boot no longer does by itself.
 - **Sleep:** `tegu-mif-sleep.ko` loads at boot from a hand unit since last
   night; a cable-out `power-ab` run with it is in progress (result in
   [SLEEP-PLAN](SLEEP-PLAN.md) S1).
+- **UFS did not come back from an s2idle, and the root went read-only
+  (afternoon).** A forced 10-minute `systemctl suspend` woke on its alarm
+  with `link startup failed 1` / `Host init failed 1` five times and
+  `ufshcd_wl_resume failed: 1` in the console; every disk read then failed,
+  ext4 went `emergency_ro`, and for an hour the palmtop answered SSH from
+  memory while `systemctl suspend`/`reboot` did nothing and the power key
+  could not light the screen. A sysrq `b` reset recovered it with a clean
+  journal replay. A palmtop that seems never to wake may be exactly this.
+  Record and rule in [SLEEP-PLAN](SLEEP-PLAN.md) S1 (#166).
 
 ## 2026-10-29: two resets at about 34 s, right after Bluetooth started
 
