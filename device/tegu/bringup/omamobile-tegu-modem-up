@@ -6,9 +6,10 @@
 # gnssif, then the modem vendor-chroot profile as the transient unit
 # omamobile-tegu-modem, whose stop powers the CP off before rfsd goes.
 #   omamobile-tegu-modem-up [--gnss]   --gnss: gnssd too (OMAMOBILE_MODEM_GNSS=1)
-# Stop it with "systemctl stop omamobile-tegu-modem" before a reboot: a
-# reboot with the CP up isn't qualified (M6). A second CP boot in the same
-# Linux boot stalled in the ROM: reboot before starting it again.
+# Stop it only by an attended reboot: the unit's ExecStop powers the CP off
+# during shutdown (MODEM-PLAN M5, M-SIM); never stop the profile by hand. A
+# second CP boot in the same Linux boot stalled in the ROM: reboot before
+# starting it again.
 set -euo pipefail
 M=/var/lib/omamobile-tegu/modem
 say() { printf 'omamobile-tegu-modem-up: %s\n' "$*"; }

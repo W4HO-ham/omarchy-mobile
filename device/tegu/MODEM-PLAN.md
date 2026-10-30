@@ -1063,8 +1063,8 @@ tools/phone-ssh 'test -d /sys/module/cpif && echo cpif-loaded || echo cpif-not-l
 #   pass: cpif-not-loaded; inactive.  stop: cpif-loaded or active: the modem ran this boot; reboot first
 #   the modem profile: a real install from main, not the hand copies. 0.1.10 once #148 and #163 have merged
 #   (the single open file instead of the open-and-close watcher, and the once-per-boot refusal); if they haven't
-#   by 11-03, main's 0.1.8 with the hand-copied 0.1.9 profile is NOT acceptable either: record why and wait,
-#   or install 0.1.8 and keep the old watcher off (omamobile-modem-sit's state read is the only watcher then)
+#   by 11-03, main's 0.1.8 with the hand-copied 0.1.9 profile is NOT acceptable either: record why and wait
+#   (0.1.8 starts the old watcher unconditionally, so it can't be turned off without a hand edit)
 tools/phone-install-package packages/omamobile-modem
 tools/phone-ssh 'pacman -Q omamobile-modem; pacman -Qkk omamobile-modem && echo pkg-clean; sha256sum /usr/lib/omamobile-vendor/profiles/modem.conf'
 #   pass: omamobile-modem 0.1.10; pkg-clean (no file altered); record the version and the profile's sha256 in this
