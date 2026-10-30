@@ -5,9 +5,11 @@ Status (2026-10-30): s2idle works (RTC and power-key wakes; NFC and Wi-Fi
 have their own notes in NOTES and AGENTS), but the drain in sleep is high,
 and three test sleeps have never woken (two direct freezes and one
 30-minute systemd sleep with `tegu-mif-sleep` loaded; S1), so sleep tests
-are attended. The shell's nightly auto-sleep, which the palmtop runs with
-the `omamobile-sleep` toggle on and without the module, has woken every
-time and goes on.
+are attended. The shell's auto-sleep (the `omamobile-sleep` toggle) is
+off on the palmtop since the 2026-10-30 shell reinstall (the package ships
+it off), so it doesn't sleep unattended at present; while it was on, its
+systemd-path sleeps without the module all woke, and turning it back on is
+the owner's call.
 This plan gathers what's measured, an audit from stock's device tree and
 a read-only snapshot of the palmtop, the candidates ranked, and a
 measurement runbook.
