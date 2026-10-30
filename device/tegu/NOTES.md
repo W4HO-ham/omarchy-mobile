@@ -68,7 +68,7 @@ So stock doesn't just stop at a recovery prompt: on both days `userdata`
 was overwritten before anyone could choose anything. Treat a fallback to
 slot A as losing the Linux root.
 
-**Marking B both days** was the approved operation above, `omamobile-bootctl
+**Marking B both days** was the approved operation below, `omamobile-bootctl
 mark-successful` for B. The binary was built statically from
 `packages/omamobile-device-cheetah/src/omamobile-bootctl.c` (source sha256
 `89d03460…`, binary `f44936d5…`), driven by a laptop script that:
