@@ -94,6 +94,27 @@ run had one thing in its way that the package boot no longer does by itself.
   could not light the screen. A sysrq `b` reset recovered it with a clean
   journal replay. A palmtop that seems never to wake may be exactly this.
   Record and rule in [SLEEP-PLAN](SLEEP-PLAN.md) S1 (#166).
+- **The GPU ran at a fixed 160 MHz on the package boot.** `omamobile-tegu-graphics`
+  gives panthor the one inherited CMU point; the 10-27 table's 150-890 MHz
+  came from the hand `tegu-gpu-dvfs-activate` overlay module (adds stock's
+  G3D levels to `/opp-table-gpu`), which the package boot no longer applied.
+  Since this evening a hand unit, `tegu-gpu-dvfs.service`, applies it after
+  the graphics start with `activate=1` and re-binds `1f000000.gpu` before
+  the session starts (the module refuses to apply before panthor is bound;
+  the first two tries at boot failed on that), and devfreq shows 14 steps,
+  150 to 890 MHz, `simple_ondemand`. Kernel #85/#87 carry the proper form.
+- **The lock's fingerprint state got stuck after the afternoon's sleeps.**
+  With the owner on the desktop, `omarchy-shell lock status` said
+  `locked:true, sessionLocked:true, fingerprint:true`, the lock's PAM
+  fingerprint verify ran in a loop every few seconds (fprintd always
+  claimed, `fprintd-verify` refused with AlreadyInUse), and
+  `omarchy-restart-shell` refused "while the session is locked". A fresh
+  `omarchy-shell lock lock` and a PIN unlock put the state back. Separately,
+  the lock shows no fingerprint marker over the sensor (only the PIN pad's
+  small icon), so the owner aims blind; the circle lights only on a touch
+  inside the sensor's 101 px radius at (540, 1756), which is why the
+  morning's unlock worked once the circle had shown the spot and the
+  afternoon's attempts saw no finger down at all.
 
 ## 2026-10-29: two resets at about 34 s, right after Bluetooth started
 
