@@ -221,15 +221,21 @@ with the cable in.
   can watch, `power-ab` still runs with `--suspend systemd` (the sleep
   hooks run that way), and the hand unit that loaded `tegu-mif-sleep` at
   boot is disabled (2026-10-30). Nothing in pstore for any of the three: a
-  held power key is a pin reset, and the console log doesn't survive it;
-  the cable-out S1 figure with the module is therefore still missing.
+  held power key is a pin reset, and the console log doesn't survive it.
   The cheap test ran the same morning: a cable-in 30-minute `systemctl
   suspend` with the module loaded, the RTC alarm logged as armed before
   (`alarm_IRQ: yes`, 1800 s ahead), woke on the alarm to the second
   (`PM: Triggering wakeup from IRQ 56`, the PMIC's RTC; `suspend_stats`
-  success 1). So the module and a 30-minute systemd sleep can wake; what
-  the three failures share is still open. Next: the same probe with the
-  cable out (the only difference left to the failed run), attended.
+  success 1). The same afternoon the cable-out run was repeated with the
+  module loaded by hand (`power-ab --suspend systemd`, one round, the
+  owner away for an hour) and woke on its alarm: awake with the screen off
+  273 mA (1715 samples), asleep 259.7 mA (130.0 mAh of `charge_now` over
+  1802 s). Against the previous day's 302 mA asleep without the module
+  that is about 40 mA saved, in line with the cable-in coulomb-counter
+  figure given the gauge's coarseness. So neither the module, nor the
+  30-minute systemd sleep, nor the cable being out reproduces the no-wake
+  on its own; the three failures' common factor is still open, and sleeps
+  stay attended.
 - A later note on the method: `power-ab`'s CSV columns are
   `voltage_uv,current_ua,current_avg_ua,charge_counter_uah,charge_now_uah`;
   the gauge's `current_avg` is a long filter and says little about a
