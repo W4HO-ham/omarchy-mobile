@@ -13,6 +13,23 @@ hash/build ID; this dirty release is not a published kernel package.
 `[V]` marks verified observations; `[I]` marks an inference still to test.
 Raw captures, recordings, backups and vendor files remain off repository.
 
+## 2026-10-29: the s2idle drain is the SoC floor, not the CPUs or the radios
+
+- Cable out, screen off: 311 mA awake, 302 mA asleep (two 30-minute
+  `systemctl suspend` rounds through `power-ab --suspend systemd`). The CPUs
+  sleep (timekeeping suspended for the whole of a 60 s test, one deep-state
+  entry per CPU); Bluetooth, NFC and Wi-Fi cost nothing measurable at idle.
+  What stays on is MIF, the buses and the always-on rails: there is no
+  system idle state in our kernel. `tegu-mif-sleep.ko` (MIF 421 MHz in
+  sleep) saves about 60-75 mA and is loaded at boot by a hand unit now.
+  Details and method in [SLEEP-PLAN](SLEEP-PLAN.md) S1.
+- `rtcwake -m freeze` written straight to `/sys/power/state` failed to wake
+  again (the second time in two days); `systemctl suspend` after
+  `rtcwake -m no` has woken every time. Use only the systemd path.
+- The 2026-10-27 "140 mA asleep" figure doesn't hold up against 2026-10-28
+  (434-445 mA cable out, as-is) and tonight; treat about 300 mA cable out
+  as the baseline.
+
 ## 2026-10-26: audio (speakers, microphones, A2DP) with omamobile-audio 0.5.0
 
 Kernel `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`: the private

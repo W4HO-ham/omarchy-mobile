@@ -162,6 +162,57 @@ back on the cable within 5 minutes of the end (power key). Rollback:
 `rmmod tegu-mif-sleep` (the module changes nothing while awake: it sets the
 rate at suspend-prepare and puts the old one back at resume), or a reboot.
 
+**S1 result (2026-10-29, `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`,
+device-tegu 0.2.0).** The baseline ran as written (cable out, screen off,
+Wi-Fi kept, modem not started, two 30-minute `systemctl suspend` rounds
+through `power-ab --suspend systemd`), then the pieces were pulled apart
+with the cable in.
+
+- **Cable out: 311 mA awake with the screen off, 302 mA asleep** (phase A
+  3434 samples of `current_now`; phase B 302.5 mAh of `charge_now` over
+  3604 s, two rounds, both woken by the RTC through the PMIC, `success` 2).
+  Sleep saves nothing over the awake screen-off state. The 140 mA of
+  2026-10-27 is the outlier: a cable-out A/B on 2026-10-28
+  (`logs/tegu-morning-20261028/sleep-ab-20261028b.log`) already read 434
+  and 445 mA asleep as-is and 374 and 389 mA with MIF at 421 MHz.
+- **The CPUs do sleep.** A 60 s `systemctl suspend` with the cable in ran
+  with `Timekeeping suspended for 60.059 seconds` and each cluster's deep
+  state entered once in s2idle (`cpuidle/state1/s2idle/usage` +1 per CPU),
+  so no interrupt keeps the cores up. What stays on is everything below
+  them: MIF and the buses at full rate, and the always-on rails. Google's
+  kernel has a system idle state (SICD) for this; ours has none.
+- **The radios cost nothing at idle** (cable in, buck off through
+  `CHG_CNFG_00` 0x00 under a dead-man restore, screen off, 45 s means of
+  `current_now`): baseline 351 mA, Bluetooth off 355, NFC driver unbound
+  356, Wi-Fi link down 360. All within noise.
+- **MIF at 421 MHz in sleep saves about 60-75 mA.** Cable in, buck off,
+  240 s `systemctl suspend` sleeps measured by the gauge's coulomb counter
+  (`QH`, register 0x4d of the fuel gauge at 0x36 on bus 24; 2.5 mAh per
+  count, checked against 60 s of `current_now`): as-is 12 counts, 446 mA;
+  with `tegu-mif-sleep.ko` 10 counts, 371 mA (one count is 37 mA at this
+  length). This matches the 2026-10-28 figure (57 mA). The module loads,
+  unloads and wakes cleanly; the palmtop now loads it at boot from a hand
+  unit, `/etc/systemd/system/tegu-mif-sleep.service`
+  (`insmod /var/lib/omamobile-tegu/tegu-mif-sleep.ko`), until the policy
+  is in the kernel or the device package. Cable-in figures sit about
+  140 mA above cable-out ones (the USB link keeps the SoC busy).
+- **`rtcwake -m freeze` straight to `/sys/power/state` is not safe on the
+  9a.** The one direct freeze of the night (240 s, NFC blocked by rfkill,
+  polling already stopped) never woke from its RTC alarm; the owner reset
+  it with Power + Volume Up about 25 minutes later. The 2026-10-28 run lost
+  one of four the same way, while every `systemctl suspend` cycle so far
+  (35 on 2026-10-27, 2 x 30 min and 4 short ones tonight) woke. Until the
+  difference is understood, every sleep test goes through `systemctl
+  suspend` after `rtcwake -m no -s N`. Nothing in pstore: a held power key
+  is a pin reset, and the console log of the hung sleep didn't survive it.
+- A later note on the method: `power-ab`'s CSV columns are
+  `voltage_uv,current_ua,current_avg_ua,charge_counter_uah,charge_now_uah`;
+  the gauge's `current_avg` is a long filter and says little about a
+  30-minute window, so read `charge_now` (or `QH`) across the sleep.
+
+Next: S2 (the four rails), and a cable-out `power-ab` run with the module
+loaded to put a cable-out number on the MIF saving.
+
 **S2. Rails (risk low).** As S1 with the three GNSS rails and `udfps-3v3`
 not always-on: the running DTB with `regulator-always-on` removed from
 LDO9S-11S and LDO15S, nothing else (the S2 commit above). Not in or around
