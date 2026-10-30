@@ -35,6 +35,55 @@ resets) and are in [MODEM-PLAN](MODEM-PLAN.md) under "G3, twenty-fourth to
 thirty-fourth tries" and "The CP link hang". Not a GNSS matter: if a boot
 with nothing but Bluetooth starting resets again at that time, start here.
 
+## 2026-10-29: the device package boot, and what this row rests on
+
+The palmtop's bring-up runs from `omamobile-device-tegu` 0.2.0
+(<https://github.com/derekross/omarchy-mobile/pull/152>) since the 12:28
+local boot on 2026-10-29, release
+`7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty` (the unpublished
+integration tree; the board device tree is in review as linux-omarchy-mobile
+#80), with the hand copies the package replaces moved aside under
+`/var/lib/omamobile-tegu/before-pkg/`. `tools/phone-smoke` on that boot:
+19 of 19 (boot on slot B, the storage guard with only `userdata` and slot
+B's images writable, the ext4 root, no oops or WARN, no failed units, the
+USB gadget, the panel at 1080x2424, a render node on panthor, Hyprland and
+the shell, the lock, Synaptics touch, gpio-keys, wlan0 up, hci0 powered,
+the gauge, the AoC sound card, three sensors, three cameras, hottest zone
+44 °C). Packages on it: omamobile-device-tegu 0.2.0-1, omamobile-audio
+0.4.1-1, omamobile-fingerprint 0.1.8-1, omamobile-apps 0.2.0-1, hyprland
+0.56.2-5.1, mesa 1:26.2.4-1.4, libcamera 0.7.2-4.22.
+
+What each cell of the DEVICES row rests on, beyond the 10-27 and 10-28
+list below:
+
+- **Boot:** slot B marked successful by hand on 2026-10-28 (the `devinfo`
+  write approved on 2026-10-22, now on hold, #125); the package does not
+  mark it. A fallback to slot A would cost the Linux root.
+- **Started by the package at boot** (`omamobile-tegu-graphics.service`):
+  the display at 120 Hz (the start sets `allow_tx` for `google-tg4c`, with
+  or without the bootloader's panel-id suffix), the GPU, haptics, the torch,
+  the gauge and Bluetooth; the USB rescue helper. Everything else in the
+  row that says "by hand" is not.
+- **GPU:** on this boot devfreq reports `simple_ondemand` with min, max and
+  current all 159.7 MHz and `runtime_status` suspended, so the desktop
+  renders and the GPU sleeps when idle, but frequency scaling is not
+  active on the published form and counts as in review (kernel #85, #87).
+- **Battery through UPower, 2026-10-29 evening:** energy-rate 1.06 W, time
+  to empty 18.5 h at 87 %.
+- **Sensors:** accelerometer, ambient light and proximity, as every smoke
+  report of the day lists them. No gyroscope or compass has been seen on
+  this palmtop; the row no longer claims them.
+- **Wi-Fi across sleep:** kept loaded by the package's sleep hook
+  (`/etc/omamobile/wifi-keep-across-sleep` is set) through the 2026-10-29
+  S1 sleeps ([SLEEP-PLAN](SLEEP-PLAN.md) S1).
+- **NFC:** a payment card read on the morning of 2026-10-29 with the
+  kernel #131 modules (its thread has the dmesg lines); neard started by
+  hand, polling stopped before sleep by the package's hook.
+- **Suspend:** the shell's sleep daemon (`omamobile-sleepd`) suspends the
+  palmtop once the screen is off and locked; the power key and the RTC wake
+  it; the drain is the S1 figure.
+- **Speakers:** the -10 dB ceiling recorded below, by hand with the AoC.
+
 ## 2026-10-28, evening: USB-C host mode through TCPM
 
 Kernel `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty` (the
@@ -332,56 +381,6 @@ bootloader's 2028 MHz until something asks for less.
 **Recovery.** A reboot stuck in `device_shutdown` needs Power held about
 30 s, then Power; with a task stuck in D, reboot with `echo b >
 /proc/sysrq-trigger` instead of `systemctl reboot`.
-
-## 2026-10-29: the device package boot, and what this row rests on
-
-The palmtop's bring-up runs from `omamobile-device-tegu` 0.2.0
-(<https://github.com/derekross/omarchy-mobile/pull/152>) since the 12:28
-local boot on 2026-10-29, release
-`7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty` (the unpublished
-integration tree; the board device tree is in review as linux-omarchy-mobile
-#80), with the hand copies the package replaces moved aside under
-`/var/lib/omamobile-tegu/before-pkg/`. `tools/phone-smoke` on that boot:
-19 of 19 (boot on slot B, the storage guard with only `userdata` and slot
-B's images writable, the ext4 root, no oops or WARN, no failed units, the
-USB gadget, the panel at 1080x2424, a render node on panthor, Hyprland and
-the shell, the lock, Synaptics touch, gpio-keys, wlan0 up, hci0 powered,
-the gauge, the AoC sound card, three sensors, three cameras, hottest zone
-44 °C). Packages on it: omamobile-device-tegu 0.2.0-1, omamobile-audio
-0.4.1-1, omamobile-fingerprint 0.1.8-1, omamobile-apps 0.2.0-1, hyprland
-0.56.2-5.1, mesa 1:26.2.4-1.4, libcamera 0.7.2-4.22.
-
-What each cell of the DEVICES row rests on, beyond the 10-27 and 10-28
-list below:
-
-- **Boot:** slot B marked successful by hand on 2026-10-28 (the `devinfo`
-  write approved on 2026-10-22, now on hold, #125); the package does not
-  mark it. A fallback to slot A would cost the Linux root.
-- **Started by the package at boot** (`omamobile-tegu-graphics.service`):
-  the display at 120 Hz (the start sets `allow_tx` for `google-tg4c`, with
-  or without the bootloader's panel-id suffix), the GPU, haptics, the torch,
-  the gauge and Bluetooth; the USB rescue helper. Everything else in the
-  row that says "by hand" is not.
-- **GPU:** on this boot devfreq reports `simple_ondemand` with min, max and
-  current all 159.7 MHz and `runtime_status` suspended, so the desktop
-  renders and the GPU sleeps when idle, but frequency scaling is not
-  active on the published form and counts as in review (kernel #85, #87).
-- **Battery through UPower, 2026-10-29 evening:** energy-rate 1.06 W, time
-  to empty 18.5 h at 87 %.
-- **Sensors:** accelerometer, ambient light and proximity, as every smoke
-  report of the day lists them. No gyroscope or compass has been seen on
-  this palmtop; the row no longer claims them.
-- **Wi-Fi across sleep:** kept loaded by the package's sleep hook
-  (`/etc/omamobile/wifi-keep-across-sleep` is set) through the 2026-10-29
-  S1 sleeps ([SLEEP-PLAN](SLEEP-PLAN.md) S1).
-- **NFC:** a payment card read on the morning of 2026-10-29 with the
-  kernel #131 modules (its thread has the dmesg lines); neard started by
-  hand, polling stopped before sleep by the package's hook.
-- **Suspend:** the shell's sleep daemon (`omamobile-sleepd`) suspends the
-  palmtop once the screen is off and locked; the power key and the RTC wake
-  it; the drain is the S1 figure.
-- **Speakers:** the -10 dB ceiling recorded below, by hand with the AoC.
-
 
 ## 2026-10-26: audio (speakers, microphones, A2DP) with omamobile-audio 0.5.0
 
