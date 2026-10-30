@@ -121,12 +121,15 @@ wake_reason() {
 # The touchscreen's interrupt, as /proc/interrupts names it: the driver
 # requests it under its device's name (the SPI or I2C device, "spi3.0"), so
 # find the input device that is a direct touch surface (INPUT_PROP_DIRECT)
-# and take its parent device's name. Empty when there is none.
+# with a parent device, and take that parent's name. A virtual input device
+# (uinput, a test tool) has no `device` link and is skipped, so it can't
+# mask the real touchscreen. Empty when there is none.
 touch_irq_name() {
   local d props
   for d in "$sys"/class/input/input*; do
     props=$(cat "$d/properties" 2>/dev/null) || continue
     (( (0x${props:-0} & 0x2) )) || continue
+    [[ -e $d/device ]] || continue
     basename "$(readlink -f "$d/device")"
     return 0
   done
