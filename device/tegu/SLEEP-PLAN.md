@@ -243,7 +243,16 @@ with the cable in.
   figure given the gauge's coarseness. So neither the module, nor the
   30-minute systemd sleep, nor the cable being out reproduces the no-wake
   on its own; the three failures' common factor is still open, and sleeps
-  stay attended.
+  stay attended. One more observation the same afternoon, cable in, module
+  still loaded from the drain run: during a forced 10-minute systemd sleep
+  the owner's tap and power-key press did not wake the palmtop; the kernel
+  came up once at about 112 s (`Timekeeping suspended for 112.557 seconds`)
+  and went straight back to s2idle until the RTC alarm woke it at 10
+  minutes (IRQ 56). The power key woke s2idle on 10-27 without the module,
+  so the next cheap test is a sleep without the module and a power-key
+  press, then the same with the module: if the key wakes only without it,
+  the module is in the no-wake story after all (a key wake that doesn't
+  register would look exactly like an RTC alarm that doesn't).
 - A later note on the method: `power-ab`'s CSV columns are
   `voltage_uv,current_ua,current_avg_ua,charge_counter_uah,charge_now_uah`;
   the gauge's `current_avg` is a long filter and says little about a
