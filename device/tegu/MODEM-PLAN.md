@@ -999,34 +999,55 @@ power: as cheetah's GNSS-PLAN section 7, adapted to gps.cfg's keys.
 ### SIM test (M-SIM), 2026-11-03 (gated runbook, written 2026-10-29)
 
 **The runbook to follow when the SIM arrives:** a prepaid physical nano-SIM
-on a T-Mobile-network MVNO, PIN lock off, activated in another phone. It is
+from the carrier, PIN lock off, activated in another phone. It is
 cheetah's "M4.2-M4.7: the first SIM test" (cheetah MODEM-PLAN) with the
 9a's names and gaps, in raven's order (SIM, registration, data, SMS;
 raven's D-series is the only run of calls, texts and data on a Tensor phone
 here). Every step has its command, Expect/Pass, a stop condition, a
 rollback and a risk; the read-only steps come first. The human runs or
-approves each step. One rule above all: **a second CP start in the same
-Linux boot stalls in the ROM (M5 results), and nothing may restart the
-modem in place (AGENTS.md, "Suspend and modem"): after any failed step,
-reboot, then start again from SIM-5.**
+approves each step. Two rules above all. **A second CP start in the same
+Linux boot stalls in the ROM (M5 results), and nothing may restart or stop
+the modem in place (AGENTS.md, "Suspend and modem"; a profile stop by hand
+hard-reset the palmtop once, M5 results above, "gnssd's exit took the modem
+down"): after any failed step, an attended reboot, whose shutdown runs the
+unit's stop, then start again from SIM-5.** And **the session's budget is
+one reboot cycle beyond the final one: one hang or unexpected reset ends
+the session for the day.** This is the riskiest session the palmtop has
+had (a SIM, a transmitting radio, an unqualified power-off path), so the
+room for retries is smaller than the GNSS sessions had.
+
+Preconditions, as SLEEP-PLAN's:
+
+- **Slot B.** Stop if slot B isn't marked successful; this runbook doesn't
+  mark it (marking is a `devinfo` write, on hold on the 9a: AGENTS.md,
+  "Pixel 9a: a fallback to slot A costs the Linux root", from
+  <https://github.com/derekross/omarchy-mobile/pull/125>). An unmarked B
+  burns an ABL retry on every boot, and a reboot cycle, a power-off round
+  or a hang each count as one; at zero, ABL boots stock on slot A and the
+  Linux root is gone.
+- **The modem package is a real install** (SIM-1): not the palmtop's
+  `omamobile-modem` 0.1.4 with newer profile files copied over it by hand.
+- **Charger in** for the whole session, Wi-Fi up (the default route stays
+  on Wi-Fi), another phone at hand, and nobody calls the palmtop's number
+  during the test (SIM-10).
 
 **What the 9a has and lacks for this test (checked on the palmtop,
 2026-10-29 night):**
 
 | Piece | State | What it means here |
 | --- | --- | --- |
-| Modem to ONLINE | `/usr/local/bin/omamobile-tegu-modem-up` (M5, once per boot; refuses a second start; arms the sleep inhibitor `omamobile-tegu-modem-nosleep`) | the start is this script, not `omamobile-modem.service`, which is `masked-runtime` on the palmtop |
-| NV safety | `omamobile-modem` 0.1.4; `/etc/omamobile/modem-nv.sha256` from the 2026-10-28 backup; the profile's `check` runs inside the start script | a stock boot since 2026-10-28 would make `check` refuse; then a fresh read-only backup and a new checksum file come first (AGENTS.md §1) |
-| The RIL | **`omamobile-modem-sit` is not installed** (`pacman -Q`: not found); main carries 0.3.3 | SIM-1 installs it. Its unit `Requires=omamobile-modem.service`, which is masked here, so `systemctl start omamobile-sitd` would fail until SIM-2's unit copy removes that requirement (done 2026-10-29) |
+| Modem to ONLINE | `/usr/local/bin/omamobile-tegu-modem-up` (M5, once per boot; refuses a second start; arms the sleep inhibitor `omamobile-tegu-modem-nosleep`; its source is [bringup/omamobile-tegu-modem-up](bringup/omamobile-tegu-modem-up)) | the start is this script, not `omamobile-modem.service`, which is `masked-runtime` on the palmtop; the transient unit's ExecStop (the profile's stop, which powers the CP off) runs at shutdown, so the way to stop the modem is an attended reboot, never a stop by hand |
+| NV safety | `pacman -Q` says `omamobile-modem` 0.1.4, but the profile files under `/usr/lib/omamobile-vendor` were copied by hand from newer trees (the 27th GNSS try ran 0.1.9's watcher; 0.1.4 predates the 9a's chroot support), so `pacman -Qkk omamobile-modem` is not clean; `/etc/omamobile/modem-nv.sha256` from the 2026-10-28 backup; the profile's `check` runs inside the start script | the NV checks live in that profile, so SIM-1 installs the package from main for real and records the version and the profile's sha256; a stock boot since 2026-10-28 would make `check` refuse; then a fresh read-only backup and a new checksum file come first (AGENTS.md §1) |
+| The RIL | `omamobile-modem-sit` 0.3.3 installed 2026-10-29 (SIM-1), both units disabled; 0.3.4 (<https://github.com/derekross/omarchy-mobile/pull/156>) reads the CP state on one open file | 0.3.3's watcher opens and closes the boot device about thirty times a minute, and that cycles the CP link on the 9a (the 10-29 hangs); the run uses 0.3.4 (SIM-1). Its unit `Requires=omamobile-modem.service`, which is masked here, so `systemctl start omamobile-sitd` would fail until SIM-2's unit copy removes that requirement (done 2026-10-29) |
 | The bridge for apps | `omamobile-mmd` not installed | not part of this test (T2 follows a passing run) |
-| The link watcher | `omamobile-modem` 0.1.9's watcher (omarchy-mobile #148) is not merged or installed | with the CP ONLINE the link idles and cycles on its own; on 2026-10-29 the palmtop hung eight times in a morning with the modem up for hours (the console logs end on CPIF's `cp2ap_wakeup` wake toggles; `logs/tegu-review-20261029/hangs/`). Keep the session short (under an hour) and attended; `cpif-keep-link.ko` (G3-L1 step 1, untested) is the candidate fix, not part of this run |
+| The link watcher | `omamobile-modem` 0.1.9 (<https://github.com/derekross/omarchy-mobile/pull/148>) keeps one open file on the boot device, which retires the old open-and-close watcher that woke the CP link every half second; 0.1.10 (<https://github.com/derekross/omarchy-mobile/pull/163>) adds the once-per-boot refusal | with the CP ONLINE the link idles and cycles on its own; on 2026-10-29 the palmtop hung eight times in a morning with the modem up for hours, the early ones tied to the watcher's open and close of the boot device (the console logs end on CPIF's `cp2ap_wakeup` wake toggles; `logs/tegu-review-20261029/hangs/`). The run uses 0.1.10 (SIM-1). Keep the session short (under an hour) and attended; `cpif-keep-link.ko` (G3-L1 step 1, untested) is the candidate fix, not part of this run |
 | Call audio | the AoC card is `google,tegu-aoc-snd-card` with its EP PCMs, but `omamobile-speaker-protection` is inactive and the amplifiers are TAS2572, which `voice_audio.py`'s earpiece checks (CS35L41 controls) don't know | **no audio routing exists on the 9a: calls are not part of this test.** `[audio] card = none` stays; a signalling-only call (cheetah's S10) is a later, separate step |
 | Suspend | unqualified with the modem on (section "Suspend with the modem on"); the start script's inhibitor blocks `systemctl suspend` for the boot | charger in for the whole test |
 | Identifiers | the ICCID (printed on the card), IMSI, IMEI, phone number, the carrier's name, its APN, IP addresses and message text never go into the repository, a log excerpt or a screenshot | sitd logs states and codes only; before quoting a log: `grep -nE '[0-9]{7,}|\+[0-9]|[0-9a-f]{2}(:[0-9a-f]{2}){5}|@' logs/<file>` must show nothing you would quote |
 
 **What to expect, honestly:** SIM detection likely (GET_SIM_STATUS has
-answered on this CP since M5); LTE registration likely on a T-Mobile-network
-SIM (the start-up order registered cheetah on one); data likely if the
+answered on this CP since M5); LTE registration likely on
+this network (the start-up order registered cheetah on it); data likely if the
 bearer has IPv4 (`rmnet` is IPv4 only); IMS and so SMS possible (proven on
 that one network); emergency calls never (refused by the RIL; keep another
 phone). About one fresh CP start in twenty crashed during registration on
@@ -1037,14 +1058,26 @@ cheetah: a crash is recorded, a reboot recovers it.
 packages/omamobile-modem-sit/test/all && tools/pr-check
 #   pass: all ok. Nothing on the palmtop changes.
 
-# SIM-1 install the RIL, palmtop without the SIM, modem not started this boot (risk: none)
-tools/phone-ssh 'ls /sys/module/cpif 2>/dev/null | wc -l; systemctl is-active omamobile-tegu-modem; pacman -Q omamobile-modem'
-#   pass: 0 (CPIF not loaded this boot); inactive; omamobile-modem 0.1.4 (or newer)
-#   stop: 1 or active: the modem ran this boot; reboot first
+# SIM-1 real package installs, palmtop without the SIM, modem not started this boot (risk: low; nothing starts)
+tools/phone-ssh 'test -d /sys/module/cpif && echo cpif-loaded || echo cpif-not-loaded; systemctl is-active omamobile-tegu-modem'
+#   pass: cpif-not-loaded; inactive.  stop: cpif-loaded or active: the modem ran this boot; reboot first
+#   the modem profile: a real install from main, not the hand copies. 0.1.10 once #148 and #163 have merged
+#   (the single open file instead of the open-and-close watcher, and the once-per-boot refusal); if they haven't
+#   by 11-03, main's 0.1.8 with the hand-copied 0.1.9 profile is NOT acceptable either: record why and wait,
+#   or install 0.1.8 and keep the old watcher off (omamobile-modem-sit's state read is the only watcher then)
+tools/phone-install-package packages/omamobile-modem
+tools/phone-ssh 'pacman -Q omamobile-modem; pacman -Qkk omamobile-modem && echo pkg-clean; sha256sum /usr/lib/omamobile-vendor/profiles/modem.conf'
+#   pass: omamobile-modem 0.1.10; pkg-clean (no file altered); record the version and the profile's sha256 in this
+#     plan's record block. stop: Qkk reports altered or missing files: find the hand copy, reinstall, repeat
+#   the RIL: 0.3.4 (#156, the CP state on one open file); 0.3.3 is on the palmtop since 2026-10-29 and would
+#   cycle the link about thirty times a minute
 tools/phone-install-package packages/omamobile-modem-sit
-tools/phone-ssh 'pacman -Q omamobile-modem-sit; systemctl is-enabled omamobile-sitd omamobile-sit-data; ls /etc/omamobile/modem-sit.conf'
-#   pass: 0.3.3; disabled x2 (nothing starts at boot); the conf exists
-#   rollback: pacman -R omamobile-modem-sit
+tools/phone-ssh 'pacman -Q omamobile-modem-sit; systemctl is-enabled omamobile-sitd omamobile-sit-data; ls /etc/omamobile/modem-sit.conf;
+  diff <(sed -e "/^Requires=omamobile-modem.service/d" -e "s/omamobile-modem.service/omamobile-tegu-modem.service/" /usr/lib/systemd/system/omamobile-sitd.service) /etc/systemd/system/omamobile-sitd.service && echo unit-copy-current'
+#   pass: 0.3.4; disabled x2 (nothing starts at boot); the conf exists; unit-copy-current (SIM-2's copy still
+#     matches the package's unit: the copy in /etc is temporary and hides future package versions, so re-check
+#     it after every upgrade of omamobile-modem-sit, and redo SIM-2 if it differs)
+#   rollback: pacman -R omamobile-modem-sit; the modem package stays (it is what main ships)
 
 # SIM-2 wire sitd to the 9a's modem start, and the APN (risk: none; nothing runs)
 #   omamobile-sitd.service requires omamobile-modem.service (cheetah's start), masked on the 9a. A drop-in can't
@@ -1063,6 +1096,7 @@ tools/phone-ssh 'sed -i "s/^apn =.*/apn = <APN>/" /etc/omamobile/modem-sit.conf'
 tools/phone-ssh 'grep -cE "^apn = .+" /etc/omamobile/modem-sit.conf; grep -E "^(ims|ims_apn|ims_required|nr|card|ip_type) " /etc/omamobile/modem-sit.conf'
 #   pass: 1; ims = yes, ims_apn = ims (or the carrier's), ims_required = no, nr = off, card = none, ip_type = ipv4v6
 #   stop: card is anything but none (no earpiece mode on the 9a)
+#   the unit copy is temporary: it hides future package versions of omamobile-sitd.service (SIM-1 re-checks it)
 #   rollback: rm /etc/systemd/system/omamobile-sitd.service, daemon-reload; apn back to empty
 
 # SIM-3 the backups (read-only; risk: none). M0.1 against the newest backup, as 2026-10-27.
@@ -1074,9 +1108,10 @@ tools/phone-ssh 'grep -cE "^apn = .+" /etc/omamobile/modem-sit.conf; grep -E "^(
 #   (SIM-1's check): with the CP unpowered the card is seen for the first time at SIM-5's power-on, which is what
 #   a cold insertion gives it, and the AP has no SIM line. Eject the tray with the SIM tool (right edge, bottom),
 #   nano-SIM in the tray as its outline shows, tray fully in.
-#   No hot insertion with the CP up (never tried under Linux), and no power-off round through the bootloader
-#   menu unless the CP does not see the card at SIM-6: a 9a boot cycle costs a slot-B try when B is unmarked
-#   (AGENTS.md, "Pixel 9a: an unmarked slot B"). Charger in from here to the end.
+#   No hot insertion with the CP up (never tried under Linux), and no power-off round unless the CP does not
+#   see the card at SIM-6: a 9a boot cycle costs a slot-B try when B is unmarked, and a fallback to slot A
+#   costs the Linux root (AGENTS.md, "Pixel 9a: a fallback to slot A costs the Linux root"; the precondition
+#   above: B marked, one hang ends the day). Charger in from here to the end.
 tools/phone-ssh 'cat /sys/class/power_supply/max77779-charger/online; systemctl --failed --no-legend | wc -l; dmesg | grep -c ufshcd_err_handler'
 #   pass: 1; 0; note the UFS count (U0)
 
@@ -1084,16 +1119,21 @@ tools/phone-ssh 'cat /sys/class/power_supply/max77779-charger/online; systemctl 
 tools/phone-ssh 'dmesg -w' | tee logs/tegu-sim-kmsg.log                         # terminal 2, first
 tools/phone-ssh 'journalctl -f -o short-monotonic -u omamobile-tegu-modem -u omamobile-sitd -u omamobile-sit-data' \
   | tee logs/tegu-sim-journal.log                                               # terminal 3
-tools/phone-ssh 'systemd-run --unit=x-modem-deadman --on-active=300 systemctl stop omamobile-tegu-modem'
+tools/phone-ssh 'systemd-run --unit=x-modem-deadman --on-active=300 systemctl reboot'   # an attended reboot, never a stop
 tools/phone-ssh '/usr/local/bin/omamobile-tegu-modem-up; /usr/lib/omamobile-vendor/omamobile-modem-cp state; dmesg | grep -c ufshcd_err_handler;
   systemctl is-active omamobile-tegu-modem-nosleep'
 #   pass: "modem OK: CP ONLINE" (ROM link Gen1 x1, main link Gen3 x2, "CP ONLINE (cbd exit 0)", as M5); ONLINE;
 #     UFS count = U0; the inhibitor active
 tools/phone-ssh 'systemctl stop x-modem-deadman.timer'                            # only once ONLINE was seen
-#   stop: not ONLINE within 5 minutes (the dead-man stops the unit, which powers the CP off: expect one UFS pass);
-#     collect /var/log/omamobile/modem.log as M5, reboot. "check" refused: SIM-3's stop. A hang: wait for the
-#     watchdog (RebootWatchdogSec), then Power + Volume Up 15-30 s; nothing more is sent to a silent palmtop.
-#   rollback: reboot (systemctl stop omamobile-tegu-modem first, so the stop powers the CP off; one UFS pass)
+#   stop: not ONLINE within 5 minutes: the dead-man reboots the palmtop (its shutdown runs the unit's stop, which
+#     powers the CP off: expect one UFS pass on the way down); the human is at the palmtop for it (M6 isn't
+#     passed; Power + Volume Up 15-30 s if it doesn't come back); collect /var/log/omamobile/modem.log as M5.
+#     "check" refused: SIM-3's stop. A hang (no SSH, no console): it ends in the cluster watchdog reset
+#     (CLUSTER0_NONCPU_WDTRESET, as the eight 10-29 hangs did; RebootWatchdogSec covers only a hung shutdown);
+#     wait for it, nothing more is sent to a silent palmtop, and the session is over for the day.
+#   rollback: an attended reboot (systemctl reboot: the unit's stop powers the CP off during shutdown; one UFS
+#     pass). Never "systemctl stop omamobile-tegu-modem" by hand: a profile stop hard-reset the palmtop once
+#     (M5 results, "gnssd's exit took the modem down"), and the power-off path is unqualified until M6.
 
 # SIM-6 the read-only probe: SIM state, radio off (risk: low)
 tools/phone-ssh 'timeout 60 omamobile-sitd --probe' 2>&1 | tee logs/tegu-sim-probe.log
@@ -1101,9 +1141,14 @@ tools/phone-ssh 'timeout 60 omamobile-sitd --probe' 2>&1 | tee logs/tegu-sim-pro
 #     may follow); radio state 3 or 1; packet registration state 0; "SMSC present True"
 #   record: the application list (types and states only), radio state, NR mode. Never the ICCID or IMSI:
 #     the probe prints states and codes; if a build ever prints more, don't quote it.
-#   stop: card state 0 (no SIM seen: tray seated? then, and only then, cheetah's power-off round: stop the modem
-#     unit, Volume Down + Power about 20 s to the bootloader, Power off, reseat the tray, power on to slot B,
-#     back to SIM-1's checks); (2, 2) = PIN lock on: turn it off in another phone, never here; (2, 3) = PUK:
+#   stop: card state 0 (no SIM seen: tray seated? then, and only then, one power-off round, which spends the
+#     session's one spare cycle: an attended "systemctl poweroff" (its shutdown runs the unit's stop, so the CP
+#     is powered off before the AP), reseat the tray, Power to boot slot B, back to SIM-1's checks. A plain
+#     poweroff from Linux hasn't been tried on the 9a under our kernel: the reboot path needed reboot-to
+#     (NOTES), so the final power-off call may hang the same way; if the screen is still on 90 s after the
+#     units have stopped, hold Power about 30 s, and treat it as the day's hang. The bootloader-menu route
+#     (Volume Down + Power about 20 s, Power off) is the fallback only if the Linux poweroff doesn't power off
+#     at all); (2, 2) = PIN lock on: turn it off in another phone, never here; (2, 3) = PUK:
 #     the carrier's PUK in another phone; (2, 4) = network lock: the carrier. A timeout or a CP crash: collect, reboot.
 #   rollback: none (read-only)
 
@@ -1146,20 +1191,31 @@ tools/phone-ssh 'omamobile-sit sms send <NUMBER> "omamobile test"'
 
 # SIM-10 calls: NOT in this test. No audio route exists on the 9a (table above). A signalling-only call
 #   (ring, answer, hang up, silence both ways, as cheetah's S10) is its own later step, after this runbook passes.
+#   Nobody calls the palmtop's number during the test: an incoming call that sitd can't release makes its
+#   safety stop target omamobile-modem.service, which is masked on the 9a, so it would only time out. If the
+#   journal says a call release wasn't confirmed ("call release not confirmed" or the stop timing out): don't
+#   stop anything by hand; "omamobile-sit radio off", record the journal lines (states and codes), and end
+#   the session with SIM-11's attended reboot.
 
-# SIM-11 end: radio off, the checksums again, the reboot (asks the human; one UFS pass; risk: low)
-tools/phone-ssh 'omamobile-sit radio off; systemctl stop omamobile-sit-data omamobile-sitd'
-tools/phone-ssh 'systemctl stop omamobile-tegu-modem; sleep 5; /usr/lib/omamobile-vendor/omamobile-modem-cp state; dmesg | grep -c ufshcd_err_handler'
-#   pass: the unit's stop powers the CP off; the count may be U0 + 1 (the power-off pass, M2.5), no more
+# SIM-11 end: radio off, the attended reboot, then the checksums (asks the human; one UFS pass; risk: low-medium)
+tools/phone-ssh 'omamobile-sit radio off; systemctl stop omamobile-sit-data omamobile-sitd'     # the RIL, not the modem
+tools/phone-ssh 'dmesg | grep -c ufshcd_err_handler; sync'
+#   record the UFS count; the modem unit is NOT stopped by hand (the rule above): its stop runs at shutdown
+tools/phone-ssh 'systemctl reboot'
+#   the human stays at the palmtop (M6 isn't passed): the shutdown runs the unit's stop, which powers the CP off
+#   (one UFS pass, M2.5), then the kernel restarts. The plain reboot call has hung on the 9a before (NOTES: reboot-to);
+#   if the screen stays on past 90 s, RebootWatchdogSec resets the palmtop a minute into the hung shutdown; if
+#   nothing after 3 minutes, Power + Volume Up 15-30 s. Either counts as the day's one spare cycle.
+#   after the boot, before anything starts the modem (units disabled, the start script is by hand):
 #   M0.1 once more (read-only): the six partitions unchanged against SIM-3. stop: any diff: all modem work stops
-tools/phone-ssh 'sync; (sleep 1; reboot-to omamobile) >/dev/null 2>&1 &'
-#   the SIM can stay in the tray; nothing starts the modem at boot (units disabled, the start script is by hand)
-#   the human stays at the palmtop for this reboot (M6 isn't passed): Power + Volume Up if it doesn't come back
+tools/phone-ssh 'test -d /sys/module/cpif && echo cpif-loaded || echo cpif-not-loaded; dmesg | grep -c ufshcd_err_handler'
+#   pass: cpif-not-loaded; the SIM can stay in the tray
 ```
 
 **Unqualified after a passing run:** suspend with the modem on (the
-inhibitor stays; M6, two reboots with the CP up; the modem at boot, which
-makes every boot power it); calls (no audio route; signalling-only first);
+inhibitor stays; M6, two reboots with the CP up: this runbook's attended
+reboots count toward it but don't pass it; a power-off from Linux with the
+CP up; the modem at boot, which makes every boot power it); calls (no audio route; signalling-only first);
 the bridge and the apps (T2, `omamobile-mmd`); hours-long sessions (the
 link-cycling hangs of 2026-10-29 until `cpif-keep-link` or the watcher is
 in). **Record** here, one block per run: the date, `uname -r`, the package
