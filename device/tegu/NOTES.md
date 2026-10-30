@@ -25,7 +25,11 @@ run had one thing in its way that the package boot no longer does by itself.
   things had to be done by hand first: the sensor driver is not under
   `/lib/modules` for this release (`goodix-fp.ko` lives in
   `/var/lib/omamobile-tegu/`, loaded by `insmod`), and the stack has to be
-  started as `omamobile-fp-chroot start bridge`, not `start storage`.
+  started as `omamobile-fp-chroot start bridge`, not `start storage`. A
+  hand unit, `tegu-fp-stage.service` (insmod the driver, then the bridge
+  stage, after the graphics start), does both at boot since the afternoon,
+  so the lock screen takes a finger without a hand step; it is not in the
+  repository, like the clock-pad unit below.
 - **No circle after the power key.** With the screen lit after the shell's
   power-key off and on, the panel's backlight device still read
   `bl_power` 4, and setting it back to 0 was not enough: the backlight
