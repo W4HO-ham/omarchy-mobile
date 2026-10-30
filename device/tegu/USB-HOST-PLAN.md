@@ -95,7 +95,10 @@ host mode on: H5's `echo b`, H4's swap timer firing, or a forced restart
 with the drive in. After each one, with the inline USB-C meter between the
 palmtop and the drive, expect VBUS to fall to 0 within the reboot. **Stop if
 VBUS is still up two minutes after the reset.** Don't plug the laptop in
-(two sources on VBUS); unplug the drive and report it.
+(two sources on VBUS); unplug the drive and report it. Without a meter, the
+laptop goes back in no sooner than 60 s after any crash with host mode on:
+H5 showed the boost stays up for the RT9470's watchdog period (about 40 s)
+before it drops by itself, and the laptop's VBUS must not meet it.
 
 **After any unexpected reset** (a forced restart, a crash loop; not the
 timer's planned reboot), read pstore on the next boot before anything else.
@@ -234,7 +237,16 @@ stubs on `PATH` (its `deny-hardware` directory, the hands-free guard from
 10-26, which logs every `ssh`, `dd` and `fastboot` call and exits 97), so the
 images the kit packed were pushed with the repository's own `bin/omamobile
 push` from a scratch checkout of `main` carrying the kit's `device.conf`;
-the same path and verification, the guard left as it is. The boot:
+the same path and verification, the guard left as it is. The `-dirty`
+release is the run kit's osc2 Image from the gn3 integration tree on maclab
+(`~/tegu/int-dt-20261026/kernel`, the tree with about fifty local changes);
+the kernel #127 boost driver (`6c5d97e18`) and the kernel #139 SGPIO driver
+(that PR's head) were built out of tree against that build's output and
+installed under `/lib/modules/<release>/updates/otg` and `updates/gpio`.
+The kit's `device.conf` differs from main's: it carries `SOC_IDS` (main's
+lacks it, which is why the repository's push tool refused main's
+descriptor) and a longer `DTB_OVERLAYS` list, the bring-up overlays ending
+in `package-startup`. The boot:
 `max77779-pmic 24-0066: MAX77779 PMIC revision 0x02` at 3.47 s, its
 interrupt in `/proc/interrupts` as IRQ 63 on gpa8 (`24-0066`, Level) at 0
 counts, no "no interrupt line", the gadget configured, smoke 19 of 19 (0
@@ -414,7 +426,15 @@ own 40 s watchdog expiring with nothing left to kick it (stock services it
 from the PMIC interrupt; #127's driver does the same once loaded). So a
 crash with host mode on leaves VBUS up for the chip's watchdog period,
 about 40 s, then the boost drops by itself; the regulator core's
-unused-regulator cleanup played no part (no module loaded). Then
+unused-regulator cleanup played no part (no module loaded). **Expect not
+met: the boost stays on until the RT9470's watchdog drops it, within the
+stop window** (the Expect was VBUS at 0 within the reboot; the two-minute
+stop was not reached, so stopping wasn't needed). The laptop went back in
+about 45 s after the reset (the h5 log's "resetting now" at 08:02:28
+palmtop time, SSH answering at 08:03:14 with uptime 0 min), inside the 60 s
+the meter rule now asks for: the boost was still on at 3 s and may have met
+the laptop's VBUS; no harm was seen, dwc3 enumerated normally and the gadget
+came up, but the rule above is there so it doesn't happen again. Then
 `modprobe tegu_rt9471_boost` on that boot: `id 0x9`, `JEITA on, watchdog on
 (0x1)` (the state a reset leaves, unlike the power-on state H2b saw),
 `watchdog serviced from interrupt 90`, and after the probe `FUNCTION` 0x41 /
@@ -422,7 +442,8 @@ ICSTAT 0xf8: the driver takes the left-on chip over and clears OTG. The
 drive was swapped for the laptop after the desktop came back and SSH
 returned by itself in under a minute (the rescue unit closed the data
 switch: "gadget not attached, VBUS present, USBSW_CTRL 0x24: closing the
-data switch"). Pass. One side effect for the record: on the next push from
+data switch"). The reset and the read count; the Expect is noted as not
+met above. One side effect for the record: on the next push from
 that boot (the GNSS DTB round), slot B's images were written and verified
 but the push's reboot command never reached the palmtop, and USB, Wi-Fi
 and the tailnet were all gone while the desktop still answered touch; the
