@@ -204,20 +204,29 @@ with the cable in.
   tegu-mif-sleep; rmmod tegu_mif_sleep` (nothing changes while awake), and
   the module must be rebuilt for every kernel push. Cable-in figures sit about
   140 mA above cable-out ones (the USB link keeps the SoC busy).
-- **`rtcwake -m freeze` straight to `/sys/power/state` is not safe on the
-  9a.** The one direct freeze of the night (240 s, NFC blocked by rfkill,
-  polling already stopped) never woke from its RTC alarm; the owner reset
-  it with Power + Volume Up about 25 minutes later. The 2026-10-28 run lost
-  one of four the same way: two direct freezes of five never woke, while
-  every `systemctl suspend` cycle so far (35 on 2026-10-27, 2 x 30 min and
-  4 short ones tonight) woke. Until the difference is understood, every
-  sleep test goes through `systemctl suspend` after `rtcwake -m no -s N`,
-  and `power-ab` runs with `--suspend systemd`. The entry method may not be
-  the cause: the systemd path also runs the sleep hooks, so a direct freeze
-  goes down with Wi-Fi loaded and un-prepared, and the hang may come from
-  Wi-Fi through the freeze rather than from the write itself. The rule
-  covers both. Nothing in pstore: a held power key is a pin reset, and the
-  console log of the hung sleep didn't survive it.
+- **Sleeps that never wake, three so far, and no single cause.** Not
+  woken by the RTC alarm, nor by the power key, and reset by hand with
+  Power + Volume Up: a direct `rtcwake -m freeze` of 10 min on 2026-10-28
+  (MIF as it was, after two 421 MHz sleeps that woke); a direct freeze of
+  240 s on the night of 2026-10-29 (NFC blocked, polling already stopped);
+  and on 2026-10-30 a `systemctl suspend` of 30 min, cable out, through
+  `power-ab --suspend systemd` with `tegu-mif-sleep` loaded (the A phase
+  ran at about 300 mA, the B freeze was logged, nothing after; the owner's
+  65-minute timer ran out with the palmtop dark). Woke: 35 short systemd
+  cycles on 2026-10-27, two 30-minute and four 240 s systemd sleeps on
+  2026-10-29 (one of the four with the module), two 10-minute direct
+  freezes with the module on 2026-10-28. So neither the entry method nor
+  the module alone explains it. Until it is understood: every sleep test
+  is attended, the cable-out run's sleep phase is kept to what the owner
+  can watch, `power-ab` still runs with `--suspend systemd` (the sleep
+  hooks run that way), and the hand unit that loaded `tegu-mif-sleep` at
+  boot is disabled (2026-10-30). Nothing in pstore for any of the three: a
+  held power key is a pin reset, and the console log doesn't survive it;
+  the cable-out S1 figure with the module is therefore still missing.
+  Next on this: a way to see the hung state (the RTC alarm registers and
+  the wake sources after a forced reset are gone; a kmsg stream to the
+  laptop needs the cable, so a cable-in 30-minute systemd sleep with the
+  module, logged, is the next cheap test).
 - A later note on the method: `power-ab`'s CSV columns are
   `voltage_uv,current_ua,current_avg_ua,charge_counter_uah,charge_now_uah`;
   the gauge's `current_avg` is a long filter and says little about a
