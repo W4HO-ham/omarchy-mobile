@@ -2,6 +2,134 @@
 
 Findings from real hardware, newest first. `BRINGUP-M1.md` is the research map written before first boot.
 
+## 2026-10-30: the charger reads offline at Full, and slot B now needs its AVB footers
+
+Kernels `7.3.0-rc6-omamobile-push1-00566-g66497d0197dc` (10-29),
+`…-00568-gcfd00cdd22e6` (the gauge fix plus the fast-charge timer off),
+`…-00571-gd40c36abfc0d` (`omamobile-int` with all three charging branches)
+and the curated `…-gaae3b058ef98`; device-cheetah 0.1.34; the laptop's USB
+port.
+
+**Charging** [V]:
+
+- **What looked broken on 10-29:** a phone at 0 % didn't gain a percent on
+  the laptop and then a wall charger, and USB dropped and came back. It was
+  neither a boot loop nor USB: the drops were upower's 0 % suspends, and SSH
+  failed because the laptop's Tailscale exit node routed 172.16.42.1 away
+  from the cable (`ip route get` showed `dev tailscale0 table 52`; fixed with
+  `tailscale set --exit-node-allow-lan-access=true`). A reboot by hand
+  charged at once. Why that boot's charger stayed offline after a replug in
+  the evening is still open: the journal has no entries from 10:24 to 22:00
+  (the boot clock read 1999 until the time was set), and the gauge model had
+  failed to load at that boot (-110). The flat-battery case is issue #169.
+- **Charging works asleep:** in a fresh boot the battery took 226 mAh in 9.5
+  min of `rtcwake -m freeze` and 260 mAh in 10 min of `systemctl suspend`
+  (about 1.4-1.56 A), the same as awake.
+- **Input current:** CNFG_09 reads 0x13 (500 mA, as `default_ilim_ua` sets
+  it), but NO_AUTOIBUS is clear, so the charger picks its input current
+  itself; Google's driver sets it. The gauge's 1.42 A is real.
+- **At Full** (03:25 on 00568): CHG_DETAILS_01 went CC 0xb1, CV 0xb2, top-off
+  0xb3, DONE 0xb4, and CHG_INT_OK went 0xdd to 0xcd (CHG_OK clears) with
+  CNFG_00 still 0x05. The driver's `online` required CHG_OK as well as
+  CHGIN_OK, so a full phone on the cable read offline and upower counted it
+  as on battery. "power: supply: max77759: stay online while a full battery
+  is on the charger" reports the input from CHGIN_OK alone; on 00571 the
+  charger reads online at Full.
+- **Fast-charge timer:** CNFG_01 0x99 to 0x98 (FCHGTIME off), as Google's
+  driver sets it; read back on 00568.
+- **Replug after Full** (08:19 on 00568): after five hours at DONE, out for
+  a minute and back in; `omamobile-usb-rescue` closed the data switch and the
+  charger charged again (+373 mA at 98 %). A long unplug with the battery well
+  down, and a phone run flat, are still to be repeated.
+
+**AVB footers, the hard way** [V]:
+
+- `vbmeta_b` on this phone is byte-identical to `vbmeta_a` (stock CP2A's,
+  chaining `boot` and `init_boot` at rollback index locations 2 and 4), not
+  the one in the 10-11 backup: slot B got CP2A's factory bootloader and
+  `vbmeta` during the M1 bring-up (BRINGUP-M1 step 10). bl1, bl2, bl31, gsa,
+  ldfw, pbl, tzsw and modem match slot A's.
+- #104's images (footers with CP2A's index) booted on 00571 at 09:15 with
+  every smoke check ok. After that boot, footer-less images no longer
+  booted: curated images built by a checkout from before #104 made ABL stop
+  in fastboot at once, and a saved 00571 set from before #104 used up B's
+  tries (no USB gadget, the initramfs safety net) and fell back to stock,
+  whose recovery offered "Try again" and "Factory data reset". Neither was
+  chosen; Volume Down + Power gave fastboot, and the 00571 set with footers
+  booted, then the curated kernel rebuilt with current tools.
+- Stock's recovery ran twice and rewrote `efs`, `efs_backup`,
+  `modem_userdata` and `persist` (they matched the 10-12 backup that
+  morning); `modem_a/b` are unchanged. A fresh read-only backup was taken
+  and verified the same hour.
+- So: build every image with the current `bin/omamobile`, keep rollback sets
+  built the same way, and never choose either option on stock's recovery
+  screen.
+
+## 2026-10-29: footers with CP2A's rollback index boot on a phone with CP3A on slot A
+
+- **A footer index below slot A's boots** [V]: the descriptor now carries
+  CP2A.260705.006's footer values as the review of #104 gives them,
+  rollback index 1783209600 (2026-07-05) and security patch 2026-07-05,
+  the oldest stock build an owner runs on slot A. Rebuilt with them, `boot` and `init_boot`
+  differ from the CP3A-footer images only in the footer, and the other
+  three images are byte for byte the same. `bin/omamobile push` wrote and
+  verified slot B, and the phone booted it: `androidboot.slot_suffix`
+  `_b`, `verifiedbootstate` orange, no failed units, slot B still marked
+  successful, `tools/phone-smoke` ok (cameras skipped: no data). Slot A
+  runs CP3A, whose footers and vbmeta carry 1791158400, so this unlocked
+  ABL accepts footer indexes below the CP3A one; libavb treats an index
+  below the stored one as a rollback error, which an unlocked boot may
+  continue past
+  [V: `result_should_continue()` in external/avb `c5066a9`]. Whether ABL
+  stores the indexes while unlocked is still untested.
+
+## 2026-10-28: a phone whose vbmeta_b chains boot and init_boot, as stock's does, needs AVB footers on them
+
+A second Pixel 7 Pro (cheetah MP1.0 B0), installed with
+`tools/install-phone` from a build of `f5da1df`, kernel
+`7.3.0-rc6-omamobile-push1-g1cb4bd36f3be`.
+
+- **The phone before the install** [V, `fastboot getvar`; `avbtool
+  info_image` on `vbmeta_a` and `vbmeta_b`, read over SSH from the guarded
+  root after the install]: stock `CP3A.261005.002.A1` on slot A; ABL
+  `cloudripper-17.0-15902555` on both slots (slot B's written from that
+  factory image's bootloader image, then read back with slot B current).
+  The rest of slot B was left from an earlier stock build: `vbmeta_b` is
+  `BP2A.250605.031.A2` (Android 16, rollback index 1749081600), its radio
+  `g5300q-250320-250425-B-13407682`. `vbmeta_a` is the factory image's
+  `vbmeta.img` byte for byte, zero-padded to the partition (rollback index
+  1791158400). Both chain `boot` (rollback index location 2) and
+  `init_boot` (location 4), flags 0.
+- **Without footers, slot B never started** [V]: the phone ended in
+  Fastboot Mode with "Enter reason: BL1 requested", `slot-retry-count:b` 1
+  and `slot-successful:b` no, and no USB gadget reached the laptop in four
+  minutes. The symptom of issue #11.
+- **With `AVB_FOOTERS`, it boots** [V]: `boot` and `init_boot` get hash
+  footers from `bin/omamobile images` (AOSP's test key; that day stock
+  CP3A's rollback index 1791158400 and security patch 2026-10-05; padded
+  to 64 and 8 MiB). After `bin/omamobile flash` the Omarchy splash came
+  up, the root grew to the whole of `userdata`, `omamobile-firstboot`
+  finished and `omamobile-boot-success` marked slot B successful. Nothing
+  else changed between the two: rebuilt from the same kernel output,
+  `vendor_boot`, `vendor_kernel_boot` and `dtbo` are byte for byte the
+  same, and `boot` and `init_boot` match up to their padding and footer.
+  Each was flashed once.
+- **What triggers it: a vbmeta that chains them.** libavb reads a chained
+  partition with no footer as if vbmeta began at its first byte, finds an
+  invalid header and returns `ERROR_INVALID_METADATA`, which it never lets
+  an unlocked boot continue past. A wrong key (`ERROR_PUBLIC_KEY_REJECTED`)
+  or hash (`ERROR_VERIFICATION`) it does let through, and a vbmeta with
+  `VERIFICATION_DISABLED` set skips its descriptors [V:
+  `load_and_verify_vbmeta()` and `result_should_continue()` in
+  external/avb `c5066a9`]. The maintainer's `vbmeta_b` lists `boot` and
+  `init_boot` as hash descriptors rather than chaining them, which is why
+  that phone boots footer-less images (review of #104). This phone's `vbmeta_b` being from an older build doesn't
+  matter: stock's current vbmeta chains them the same way. So any Pixel 7
+  Pro whose `vbmeta_b` is stock's needs the footers, and a vbmeta that
+  doesn't chain them, or has verification disabled, never reads them.
+  Issue #11's phone booted after `fastboot oem disable-verification`,
+  which by its name sets that flag [I].
+
 ## 2026-10-27: the muted speakers were the open-loop coil estimate, not sleep; the static was the boost converter; the earpiece is the top speaker
 
 - **The speaker watchdog had muted media at every boot since 10-26 22:28**
