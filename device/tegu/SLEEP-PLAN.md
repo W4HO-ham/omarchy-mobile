@@ -25,7 +25,9 @@ merge):
 The figures are from the 2026-10-27 and 10-28 NOTES entries
 (<https://github.com/derekross/omarchy-mobile/pull/100>).
 
-- **s2idle with the cable out: about 140 mA** (59 minutes, 2026-10-27).
+- **s2idle with the cable out: about 300 mA** (302 mA over two 30-minute
+  sleeps on 2026-10-29, S1 below; the 140 mA read on 2026-10-27 didn't
+  hold up and is retired there).
 - **MIF in sleep** (cable in, buck off, Bluetooth blocked, 600 s RTC-woken
   freezes): 371-373 mA at MIF 2028 MHz, 314 mA at 421 MHz, so lowering MIF
   for sleep saves about 57 mA. With the cable in, the USB link keeps the
@@ -151,13 +153,16 @@ tools/phone-ssh 'power-ab --detach --unplug 180 --phase 1800 --rounds 2 --suspen
 
 `--suspend systemd` arms the RTC with `rtcwake -m no` and runs `systemctl
 suspend`, so the NFC sleep hook runs (a freeze written to
-`/sys/power/state` would skip it). Phase A is awake with the screen off,
+`/sys/power/state` would skip it). On the 9a always pass it: `power-ab`'s
+default, `--suspend rtcwake`, is a direct freeze, the path that fails to
+wake (the S1 result below), and a detached cable-out run is the worst place
+for one. Phase A is awake with the screen off,
 phase B is the 30-minute sleep, two rounds. The 9a's gauge has no
 `charge_counter`, so the figure is the `charge_now` column of the CSV
 (column 7, `charge_now_uah`): the gauge's model-corrected remaining
 charge, coarser than a coulomb counter, hence the long phases. Repeat with
 `tegu-mif-sleep` loaded (the module commit above, built against the running
-kernel). Expect about 140 mA, then less. Stop: the palmtop doesn't come
+kernel). Expect about 300 mA, then less. Stop: the palmtop doesn't come
 back on the cable within 5 minutes of the end (power key). Rollback:
 `rmmod tegu-mif-sleep` (the module changes nothing while awake: it sets the
 rate at suspend-prepare and puts the old one back at resume), or a reboot.
@@ -193,22 +198,54 @@ with the cable in.
   length). This matches the 2026-10-28 figure (57 mA). The module loads,
   unloads and wakes cleanly; the palmtop now loads it at boot from a hand
   unit, `/etc/systemd/system/tegu-mif-sleep.service`
-  (`insmod /var/lib/omamobile-tegu/tegu-mif-sleep.ko`), until the policy
-  is in the kernel or the device package. Cable-in figures sit about
+  (`insmod /var/lib/omamobile-tegu/tegu-mif-sleep.ko`, the module built
+  from `adbca4c88a21` above against this release), until the policy is in
+  the kernel or the device package. Rollback: `systemctl disable --now
+  tegu-mif-sleep; rmmod tegu_mif_sleep` (nothing changes while awake), and
+  the module must be rebuilt for every kernel push. Cable-in figures sit about
   140 mA above cable-out ones (the USB link keeps the SoC busy).
 - **`rtcwake -m freeze` straight to `/sys/power/state` is not safe on the
   9a.** The one direct freeze of the night (240 s, NFC blocked by rfkill,
   polling already stopped) never woke from its RTC alarm; the owner reset
   it with Power + Volume Up about 25 minutes later. The 2026-10-28 run lost
-  one of four the same way, while every `systemctl suspend` cycle so far
-  (35 on 2026-10-27, 2 x 30 min and 4 short ones tonight) woke. Until the
-  difference is understood, every sleep test goes through `systemctl
-  suspend` after `rtcwake -m no -s N`. Nothing in pstore: a held power key
-  is a pin reset, and the console log of the hung sleep didn't survive it.
+  one of four the same way: two direct freezes of five never woke, while
+  every `systemctl suspend` cycle so far (35 on 2026-10-27, 2 x 30 min and
+  4 short ones tonight) woke. Until the difference is understood, every
+  sleep test goes through `systemctl suspend` after `rtcwake -m no -s N`,
+  and `power-ab` runs with `--suspend systemd`. The entry method may not be
+  the cause: the systemd path also runs the sleep hooks, so a direct freeze
+  goes down with Wi-Fi loaded and un-prepared, and the hang may come from
+  Wi-Fi through the freeze rather than from the write itself. The rule
+  covers both. Nothing in pstore: a held power key is a pin reset, and the
+  console log of the hung sleep didn't survive it.
 - A later note on the method: `power-ab`'s CSV columns are
   `voltage_uv,current_ua,current_avg_ua,charge_counter_uah,charge_now_uah`;
   the gauge's `current_avg` is a long filter and says little about a
   30-minute window, so read `charge_now` (or `QH`) across the sleep.
+
+**S1 method, cable in (the steps the measurements above used; S2 reuses
+them).** Each goes into the runbook before it runs; the charger write ran
+tonight before it was written here, which is not the order the plan asks
+for.
+
+```sh
+# 1. Buck off: the palmtop runs on its battery with USB data up (risk low; charger in, battery above 30 %).
+#    First the dead-man that puts the buck back. For awake measurements a monotonic timer is enough:
+tools/phone-ssh 'systemd-run --unit=x-buck-restore --on-active=600 /usr/bin/i2cset -f -y 24 0x69 0xbc 0x05'
+#    For sleeps, monotonic timers don't run in suspend, so use the wall clock, and have the script restore on EXIT too:
+tools/phone-ssh 'systemd-run --unit=x-buck-cal --on-calendar="$(date -d "+25 min" "+%Y-%m-%d %H:%M:%S")" /usr/bin/i2cset -f -y 24 0x69 0xbc 0x05'
+tools/phone-ssh 'i2cset -f -y 24 0x69 0xbc 0x00; sleep 3; i2cget -f -y 24 0x69 0xbc; cat /sys/class/power_supply/max77779-battery/current_now'
+#    Expect: 0x00, current_now negative (discharging, about -350 mA screen off). Stop: current_now stays positive
+#    (the buck is still on: don't measure), or the dead-man refuses to arm. Rollback: the write of 0x05 below.
+# 2. Measure. Awake: 45 s means of current_now. Asleep: the gauge's coulomb counter across the sleep,
+tools/phone-ssh 'i2cget -f -y 24 0x36 0x4d w'     # QH, 2.5 mAh per count; mA = counts * 2.5 * 3600 / seconds
+#    (checked 2026-10-29: 3 counts in 60 s at a 357 mA mean of current_now; one count is 37 mA over 240 s).
+#    The sleep itself: rtcwake -m no -s 240; systemctl suspend. Never rtcwake -m freeze (the result above).
+# 3. Buck back on, then the read-back:
+tools/phone-ssh 'i2cset -f -y 24 0x69 0xbc 0x05; systemctl stop x-buck-restore.timer x-buck-cal.timer 2>/dev/null; sleep 3; i2cget -f -y 24 0x69 0xbc; cat /sys/class/power_supply/max77779-battery/status'
+#    Expect: 0x05 and current_now positive again (status reads Unknown on this driver). Stop: 0x05 doesn't read
+#    back: write it again; if it still doesn't, replug the charger (the chip's power-on default is 0x05).
+```
 
 Next: S2 (the four rails), and a cable-out `power-ab` run with the module
 loaded to put a cable-out number on the MIF saving.
