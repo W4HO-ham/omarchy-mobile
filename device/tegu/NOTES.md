@@ -30,32 +30,46 @@ run had one thing in its way that the package boot no longer does by itself.
   stage, after the graphics start), does both at boot since the afternoon,
   so the lock screen takes a finger without a hand step; it is not in the
   repository, like the clock-pad unit below.
-- **No circle after the power key.** With the screen lit after the shell's
-  power-key off and on, the panel's backlight device still read
-  `bl_power` 4, and setting it back to 0 was not enough: the backlight
-  core's blank bit stayed set, `backlight_get_brightness()` returned 0, and
-  `local_hbm_mode` refused with EPERM (the driver's allow_lhbm-and-brightness
-  check). A DPMS off and on through Hyprland cleared it. The shell's
-  power-key path (zero backlight, panel off, wake) leaves the backlight
-  device blank while the panel shows; to fix in omamobile-shell or the
-  panel driver's wake.
+- **No circle after a tap wake.** The power key turned the screen off, a
+  tap woke it to the PIN pad, and there the panel's backlight device still
+  read `bl_power` 4; setting it back to 0 was not enough, because the
+  backlight core's blank bit stayed set, `backlight_get_brightness()`
+  returned 0, and `local_hbm_mode` refused with EPERM (the driver's
+  allow_lhbm-and-brightness check). A DPMS off and on through Hyprland
+  cleared it, and so did a later power-key press, which is the wake the
+  shell handles fully. Cause and fix are in omamobile-shell
+  <https://github.com/derekross/omarchy-mobile/pull/183>: a touch wake from
+  s2idle got no `omamobile-keys wake`, so Hyprland never re-enabled the
+  display; it now runs the same wake as the power key. The panel driver
+  refusing LHBM in that state is the safe behaviour and stays.
 - **NFC card read (kernel #131's modules): pass**, after two misses. The
   controller answered every NCI command and neard reported Powered and
   Polling (Mode stayed "Idle"), but no card was ever seen, because the NFC
   clock pad (PMU 0x3e84) was off on this boot: the hand script that set it
   at boot no longer runs on the package boot. `tegu-nfc-clkpad extpad=1`
   (0x00000000 to 0x00010000) and a rebind of the driver, and the very next
-  60 s `nfctool -d nfc0 -p Initiator` poll found the card. A hand unit,
-  `tegu-nfc-clkpad.service`, sets the pad at boot until kernel #100's
-  in-driver handling is on the palmtop. Rule of thumb: a controller that
-  talks NCI but never sees a tag is the clock pad.
-- **USB-C host (H2b, H4, H5): recorded in [USB-HOST-PLAN]** (pull request
-  #178). H2b passed (the PMIC block probes with its interrupt, the boost's
+  60 s `nfctool -d nfc0 -p Initiator` poll found the card. The tool is
+  `tegu-nfc-clkpad.ko`, a bring-up kernel module (source in the owner's
+  logs, `logs/tegu-nfc-20261026/clkpad/tegu-nfc-clkpad.c`, not in the
+  repository): it takes the kernel's SMC-backed PMU regmap
+  (`exynos_get_pmu_regmap()`), does one `regmap_update_bits()` on 0x3e84
+  (EXTPAD_EN | PAD_EN), reads the register back, and is removed again;
+  never `/dev/mem`. A hand unit, `tegu-nfc-clkpad.service`, runs
+  `insmod … extpad=1 && rmmod` after `systemd-modules-load.service` and
+  before `sysinit.target`, and leaves a hang marker
+  (`/var/lib/omamobile-tegu/clkpad-started`, written before the insmod and
+  removed after; a boot that finds it skips the write and logs it). It
+  stays until kernel #100's in-driver handling is on the palmtop. Rule of
+  thumb: a controller that talks NCI but never sees a tag is the clock pad.
+- **USB-C host (H2b, H4, H5): recorded in [USB-HOST-PLAN](USB-HOST-PLAN.md)**
+  (pull request #178). H2b passed (the PMIC block probes with its interrupt, the boost's
   watchdog is serviced from it); H4 showed that unbinding the charger takes
   the Type-C port down with it as a device-link consumer (a WARN in
   `tcpm_port_unregister_pd`, VBUS to 0, the laptop link gone until the
-  dead-man reboot); H5 passed (the boost stays on across a reset, read at
-  3.13 s of the next boot, and the reworked driver takes it over).
+  dead-man reboot); H5 ran with its Expect not met, within the stop window
+  (the boost stays on across a reset, read at 3.13 s of the next boot, and
+  drops by itself when the RT9470's watchdog expires; the reworked driver
+  then takes it over).
 - **GNSS G3-A (automatic chip select, feedback delay 0): same CHPP failure,
   clean checksums**, recorded in [MODEM-PLAN](MODEM-PLAN.md) (pull request
   #179). G3-A2 (stock's 32-bit words) is the one boot left on that trace.
