@@ -751,17 +751,23 @@ tools/phone-ssh 'pacman -Q omamobile-modem-sit; systemctl is-enabled omamobile-s
 #   rollback: pacman -R omamobile-modem-sit
 
 # SIM-2 wire sitd to the 9a's modem start, and the APN (risk: none; nothing runs)
-#   omamobile-sitd.service requires omamobile-modem.service (cheetah's start), masked on the 9a: the drop-in
-#   drops that requirement and orders it after the transient unit the 9a's start script creates.
-tools/phone-ssh 'mkdir -p /etc/systemd/system/omamobile-sitd.service.d; printf "[Unit]\nRequires=\nAfter=omamobile-tegu-modem.service\n" \
-  > /etc/systemd/system/omamobile-sitd.service.d/tegu.conf; systemctl daemon-reload; systemctl show omamobile-sitd -p Requires -p After'
-#   pass: Requires= (empty), After= lists omamobile-tegu-modem.service and omamobile-audio.service (ConditionPathExists=/dev/umts_ipc0 stays)
+#   omamobile-sitd.service requires omamobile-modem.service (cheetah's start), masked on the 9a. A drop-in can't
+#   drop a Requires= (systemd never resets a dependency list to empty; checked on the palmtop 2026-10-29: the
+#   drop-in left Requires=omamobile-modem.service in place), so the unit is copied whole into /etc with that line
+#   removed and omamobile-tegu-modem.service, the transient unit the 9a's start script creates, in its place.
+tools/phone-ssh 'u=omamobile-sitd; sed -e "/^Requires=omamobile-modem.service/d" \
+  -e "s/^After=\(.*\)omamobile-modem.service/After=\1omamobile-tegu-modem.service/" \
+  /usr/lib/systemd/system/$u.service > /etc/systemd/system/$u.service; systemctl daemon-reload; \
+  systemctl show $u -p Requires -p After'
+#   pass: Requires= has no omamobile-modem.service, After= lists omamobile-tegu-modem.service and omamobile-audio.service
+#   (ConditionPathExists=/dev/umts_ipc0 stays); omamobile-sit-data needs nothing (it requires omamobile-sitd only)
+#   done on the palmtop 2026-10-29 evening, with SIM-0 and SIM-1 (omamobile-modem-sit 0.3.3 installed, both units disabled)
 # the APN: the carrier's published internet APN, typed by the human over ssh; never pasted into a log or this plan
 tools/phone-ssh 'sed -i "s/^apn =.*/apn = <APN>/" /etc/omamobile/modem-sit.conf'
 tools/phone-ssh 'grep -cE "^apn = .+" /etc/omamobile/modem-sit.conf; grep -E "^(ims|ims_apn|ims_required|nr|card|ip_type) " /etc/omamobile/modem-sit.conf'
 #   pass: 1; ims = yes, ims_apn = ims (or the carrier's), ims_required = no, nr = off, card = none, ip_type = ipv4v6
 #   stop: card is anything but none (no earpiece mode on the 9a)
-#   rollback: rm the drop-in, daemon-reload; apn back to empty
+#   rollback: rm /etc/systemd/system/omamobile-sitd.service, daemon-reload; apn back to empty
 
 # SIM-3 the backups (read-only; risk: none). M0.1 against the newest backup, as 2026-10-27.
 #   pass: the six partitions match, every NV partition ro=1 and unmounted.
