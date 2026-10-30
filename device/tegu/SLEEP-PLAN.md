@@ -223,10 +223,13 @@ with the cable in.
   boot is disabled (2026-10-30). Nothing in pstore for any of the three: a
   held power key is a pin reset, and the console log doesn't survive it;
   the cable-out S1 figure with the module is therefore still missing.
-  Next on this: a way to see the hung state (the RTC alarm registers and
-  the wake sources after a forced reset are gone; a kmsg stream to the
-  laptop needs the cable, so a cable-in 30-minute systemd sleep with the
-  module, logged, is the next cheap test).
+  The cheap test ran the same morning: a cable-in 30-minute `systemctl
+  suspend` with the module loaded, the RTC alarm logged as armed before
+  (`alarm_IRQ: yes`, 1800 s ahead), woke on the alarm to the second
+  (`PM: Triggering wakeup from IRQ 56`, the PMIC's RTC; `suspend_stats`
+  success 1). So the module and a 30-minute systemd sleep can wake; what
+  the three failures share is still open. Next: the same probe with the
+  cable out (the only difference left to the failed run), attended.
 - A later note on the method: `power-ab`'s CSV columns are
   `voltage_uv,current_ua,current_avg_ua,charge_counter_uah,charge_now_uah`;
   the gauge's `current_avg` is a long filter and says little about a
