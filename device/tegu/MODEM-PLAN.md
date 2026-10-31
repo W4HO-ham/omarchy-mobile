@@ -1030,7 +1030,35 @@ the CP, the cycling hangs the SoC), so a fix lasts about a minute per boot
 until CPIF's power-off path is made safe; GNSS still starts by hand
 ([`bringup/tegu-gnss-session`](bringup/tegu-gnss-session), which starts the
 modem, holds the link after ONLINE for the diagnostic and runs the HAL for a
-set time; once per boot). The bring-up start script
+set time; once per boot), or through Omarchy's Location switch with the hand
+units in [`bringup/location/`](bringup/location): two drop-ins that make
+`omamobile-gnss.service` run the 9a's stack instead of the 7 Pro's chip
+driver, and `tegu-gnss-start`, which brings the modem up with GNSS and runs
+the gnss-slsi profile with its NMEA on the FIFO `omamobile-gnss-nmea` reads.
+Tested on 2026-10-30: `omamobile-gnss-nmea.socket` enabled, a client's connect
+starts the stack, the HAL serves NMEA to `/run/omamobile-gnss/nmea.sock` and
+the fixes arrive (first fix about 80 s after the connect, 46 of 52 GGA
+sentences fixed in the first run), for as long as the CP link lasts. The
+package's own units are masked on the 9a by the boot command line
+(`systemd.mask=omamobile-gnss.service` in `package-startup.dtso`), so the
+switch needs that mask dropped as well.
+
+**The doorbell under the controller's lock didn't stop the hang.** The modem
+driver's doorbell write and its read-back loop in the modem's BAR window were
+the clearest unguarded access in the window (the read-back retries for up to
+100 ms, and the CP can ask for the link down inside it), so the controller got
+a doorbell access that runs under `cfg_lock`, the lock `cp_link_down()` takes
+to clear `cfg_ep_ok` (branch `tegu-cpif-doorbell`, ee8ce0061 on the owner's
+fork). With it, a 10-minute GNSS session ran 26 minutes into the boot before
+the same hang (`CLUSTER0_NONCPU_WDTRESET`, the console ending mid-cycle right
+after `wake enabled for irq 96`), so the doorbell is not it, or not all of it.
+What is left in that window: the MSI set-up and `s51xx_pcie_restore_state()`
+on the way up, CPIF's own status reads, and the cycle itself (PHY isolate and
+un-isolate twice a second, each with its PMU write through the secure
+monitor). The trace of G3-L1 is the next step, now with the doorbell ruled
+out.
+
+The bring-up start script
 [`bringup/omamobile-tegu-modem-up`](bringup/omamobile-tegu-modem-up) loads
 `cpif-keep-link.ko keep_link_up=0` and `gnss_spi.ko word32=2 piece=64
 spi_mode=0`.
