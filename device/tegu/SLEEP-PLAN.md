@@ -67,6 +67,27 @@ The figures are from the 2026-10-27 and 10-28 NOTES entries
    S5300's GNSS supplies stay up through sleep, with the modem off too. In
    stock's DT they carry `channel-mux-selection` (subsys GPS): the GNSS
    core switches them itself. Off unless the modem's GNSS runs.
+2b. **What S2 can and cannot change, now that GNSS works (read from the
+   running DTB, 2026-10-30 night).** The four rails are declared with
+   labels (`gnss_core: ldo9s`, `gnss_rf: ldo10s`, `gnss_aux: ldo11s`,
+   `udfps_3v3: ldo15s`) and **no consumer anywhere in the device tree**:
+   nothing names them as a supply, which is why they need
+   `regulator-always-on` to stay up at all. So removing that property does
+   not move the cost to the user of the rail, it simply lets the regulator
+   core's unused-rail cleanup turn all four off about 30 s after late init.
+   That is still a valid one-boot measurement, and it is what S2 asks for,
+   but it is not a shippable policy: GNSS needs its three rails for a
+   session (the Kepler RF front end cannot calibrate without them, which is
+   why they are on as stock has them), and the fingerprint sensor needs
+   LDO15S for an operation. Now that a GNSS session works end to end, the
+   policy S2 should lead to is a consumer rather than an absence: the GNSS
+   path claiming its three rails when a session starts and dropping them
+   when it ends, and the fingerprint path doing the same around an
+   operation, so the drain is paid only while something uses the hardware.
+   That needs a supply property on the consumer's node and driver support
+   on both paths, neither of which exists upstream yet, so the order is:
+   measure with S2 to learn the number, then decide whether the number
+   justifies the driver work.
 3. **Fingerprint rail always on.** `udfps-3v3` (LDO15S) is also
    `regulator-always-on` in the bring-up DTB. The sensor only needs it
    while an operation runs.
