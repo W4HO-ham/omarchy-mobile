@@ -1117,6 +1117,34 @@ there. The interrupt enable and disable calls are paired behind
 `ctrl_irq_on` and `msi_irqs_on`, so a plain enable/disable imbalance is
 out.
 
+**Why the link cycles twice a second at all: our L1 substates are a stub
+(2026-10-30 night, offline).** `gs201_pcie_cp_l1ss()` in our controller
+returns 0 and does nothing; its own comment says L1 substates are never
+enabled on this link. The modem driver asks for them after every link-up
+(`s51xx_pcie_restore_state()` calls `s51xx_pcie_l1ss_ctrl(1, ...)`), and
+Google's driver implements that call: `exynos_pcie_rc_set_l1ss()` finds the
+endpoint's L1SS capability and writes `PCI_L1SS_CTL1`/`CTL2` and the link
+control register on both ends, for the Samsung modem endpoint among others,
+behind a `use_l1ss` property in its device tree.
+
+So on stock the modem can park an idle link in L1.2 and keep it up; on ours
+the only way it can save power when it goes idle is to ask the AP to power
+the link off, which is exactly the isolate and un-isolate pair we see about
+twice a second under GNSS traffic. That is not a symptom of the hang, it is
+what makes the hang reachable in minutes: every cycle is another chance at
+whatever breaks, and the console shows the hang falling inside one.
+
+That gives the next kernel change after the trace: implement
+`gs201_pcie_cp_l1ss()` for real, as Google does, so an idle link parks
+instead of being torn down. If the cycling stops, the hang stops mattering
+for a GNSS session even before its root cause is found, and the
+`keep_link_up` diagnostic can be dropped. The registers to write are the
+root port's and the endpoint's `PCI_L1SS_CTL1` and `CTL2` plus
+`PCI_EXP_LNKCTL`'s ASPM bits, with the endpoint's capability found through
+`pci_find_ext_capability(..., PCI_EXT_CAP_ID_L1SS)`; it needs the link up
+and the ATU set, which is why Google defers the request until then and
+keeps a pending mask.
+
 The bring-up start script
 [`bringup/omamobile-tegu-modem-up`](bringup/omamobile-tegu-modem-up) loads
 `cpif-keep-link.ko keep_link_up=0` and `gnss_spi.ko word32=2 piece=64
