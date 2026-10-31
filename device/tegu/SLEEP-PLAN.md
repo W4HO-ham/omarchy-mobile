@@ -332,6 +332,34 @@ with the cable in.
   uptime, and tonight's hang the sixth of its boot at about 10 minutes:
   neither "the Nth sleep" nor "a long boot" fits both, and what they share
   is only that neither was the first sleep of its boot.
+- **The failing resume compared with the two clean ones in the same
+  console (2026-10-30 night, offline).** Lined up on their suspend entry,
+  the three resumes of that boot differ in one step:
+
+  | | clean (387.7 s) | clean (4746.9 s) | failed (10798.6 s) |
+  | --- | --- | --- | --- |
+  | `wl resume begins` | +0.754 | +0.741 | +0.717 |
+  | `dme-set attr-id 0x4021` | +0.803 | +0.800 | never |
+  | `Power mode changed to FAST series_B G_4 L_2` | +0.859 | +0.866 | never |
+  | `link startup failed 1` | - | - | +1.198, then +1.655, +2.143, +2.622, +3.058 |
+  | `reset_and_restore` | 0 | 0 | 1 |
+
+  So the failure is not in the hibern8 exit or in the device's power mode:
+  it is link startup itself, which never got as far as the first DME set.
+  Each attempt took about 430-490 ms, the UIC command timeout, and five of
+  them in a row exhausted `ufshcd_host_reset_and_restore()`. In the clean
+  resumes the whole link came up in 50 to 90 ms with the DME set and the
+  power-mode change present. The wake-interrupt disarm of irq 73 (Wi-Fi's
+  host wake, on the 154e0000 controller) lands either side of the DME set
+  in the clean runs, so its ordering against the UFS resume is not the
+  difference.
+
+  What that points at for the next run: the link-startup path on resume,
+  which at `spm_lvl` 5 is a full re-init, so the PHY power-on and the
+  release of the device reset line (`HCI_GPIO_OUT`, asserted in
+  `gs101_ufs_suspend()`) rather than anything in hibern8. Worth reading
+  next to the one-sample caveat: this is a single failure against two clean
+  resumes in that boot and five clean cycles tonight.
 - **What the five clean cycles rule out, and what they don't.** Five in a
   row with the storage counters at zero says the UFS resume path is not
   broken per se; the afternoon failure and this hang are both the sixth or
