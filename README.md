@@ -27,8 +27,11 @@ tools/build-packages                 # Omarchy Mobile's packages for aarch64 (ou
 tools/build-rootfs                   # the root image: Arch Linux ARM, Omarchy, our packages
 tools/install-phone --dry-run        # phone in fastboot: checks it, asks for your user, shows every command
 tools/install-phone                  # writes only slot B's boot images and userdata
-tools/phone-provision FACTORY.zip    # after the first boot: firmware from your own factory image
+# after the first boot: a read-only backup of the modem's partitions into DIR (below)
+tools/phone-provision --nv-backup DIR FACTORY.zip   # firmware from your own factory image, NV sums from DIR
 ```
+
+**Back up before you provision.** After the first boot, copy the modem's partitions (`persist`, `modem_a`, `modem_b`, `efs`, `efs_backup`, `modem_userdata`) and `devinfo` off the phone, read-only, into a new directory of your own outside the repository, with a `SHA256SUMS` file. The commands, which check each copy against the phone, are in [REINSTALL-RUNBOOK](device/cheetah/REINSTALL-RUNBOOK.md) section 4a. `tools/phone-provision` doesn't take this backup for you: it holds your IMEI, so you keep it, and never commit, post or attach it. `--nv-backup DIR` puts its six NV checksums on the phone (the modem starts only from copies of its partitions that still match them); the modem's board id is read from the phone's own bootconfig and written on the phone, never printed. A reinstall of your own takes the same steps; only the runbook's reinstall from Phase 0's `phone-config.tar` (a backup of the hand-installed system) restores from that tar instead.
 
 The kernel and boot images come from `bin/omamobile kernel`, `modules`, `initramfs` and `images` (CONTRIBUTING.md §4). Step by step, with what to expect at each point: [device/cheetah/REINSTALL-RUNBOOK.md](device/cheetah/REINSTALL-RUNBOOK.md).
 
@@ -49,15 +52,16 @@ The kernel and boot images come from `bin/omamobile kernel`, `modules`, `initram
 | `docker/` | Ubuntu 24.04 build environment |
 | `docs/DEVICES.md` | Supported-devices matrix |
 | `docs/ROADMAP.md` | Where things stand and the plan to a working phone |
+| `docs/DEMO.md` | Fictional demo data, screenshots and screen recordings for the website and videos (`tools/phone-demo`) |
 | `docs/RELEASES.md` | How builds and releases work for several devices: device descriptors, the kernel package, release bundles |
 
-Large trees live outside the repo, under `~/android/`:
+Large trees live outside the repo: the Android-side sources, images and captures under `~/android/`, and the kernel under `~/omamobile-kernel/` (`~/android/mainline` on setups from before 2026-10-29; the tools find either):
 
 | Path | Contents |
 | --- | --- |
 | `~/android/omamobile` | LineageOS 24.0 source. Includes Google's GPL Pixel 7 kernel at `out-kernel/google/gs-6.1` |
-| `~/android/mainline/linux` | Our kernel repo: branch `omamobile` on mainline v7.3-rc6 (remote `upstream` is Linus's tree), one commit per subsystem so patches can go upstream. Published to [derekross/linux-omarchy-mobile](https://github.com/derekross/linux-omarchy-mobile) by `tools/publish-kernel` (a squashed upstream base, our commits unchanged on top) |
-| `~/android/mainline/pmos-tensor` | postmarketOS Tensor kernel, for reference |
+| `~/omamobile-kernel/linux` | Our kernel repo: branch `omamobile` on mainline v7.3-rc6 (remote `upstream` is Linus's tree), one commit per subsystem so patches can go upstream. Published to [derekross/linux-omarchy-mobile](https://github.com/derekross/linux-omarchy-mobile) by `tools/publish-kernel` (a squashed upstream base, our commits unchanged on top) |
+| `~/omamobile-kernel/pmos-tensor` | postmarketOS Tensor kernel, for reference |
 | `~/android/reference` | Captures from the phone. Contains serial numbers and partition backups: never commit |
 | `~/android/factory` | Verified stock factory images, used to restore the phone |
 
