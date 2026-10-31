@@ -79,9 +79,11 @@ list below:
 - **NFC:** a payment card read on the morning of 2026-10-29 with the
   kernel #131 modules (its thread has the dmesg lines); neard started by
   hand, polling stopped before sleep by the package's hook.
-- **Suspend:** the shell's sleep daemon (`omamobile-sleepd`) suspends the
-  palmtop once the screen is off and locked; the power key and the RTC wake
-  it; the drain is the S1 figure.
+- **Suspend:** with the `omamobile-sleep` toggle on (it ships off), the
+  shell's sleep daemon (`omamobile-sleepd`) suspends the palmtop once the
+  screen is off and locked; the power key and the RTC wake it, but three test
+  sleeps have not woken, so sleep tests stay attended (SLEEP-PLAN S1); the
+  drain is the S1 figure.
 - **Speakers:** the -10 dB ceiling recorded below, by hand with the AoC.
 
 ## 2026-10-28, evening: USB-C host mode through TCPM
