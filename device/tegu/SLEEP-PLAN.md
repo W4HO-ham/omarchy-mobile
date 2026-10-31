@@ -360,6 +360,24 @@ with the cable in.
   `gs101_ufs_suspend()`) rather than anything in hibern8. Worth reading
   next to the one-sample caveat: this is a single failure against two clean
   resumes in that boot and five clean cycles tonight.
+- **A hypothesis for that link startup, from comparing the driver with
+  Google's (offline).** Both drivers pulse the device reset in the
+  controller-enable notifier before link startup, with the same 5 us, so
+  that is not the difference. What our gs201 and zumapro descriptions carry
+  and Google's does not express the same way is idle clock gating:
+  `EXYNOS_UFS_OPT_CLKSTOP_PRE_CHANGE | EXYNOS_UFS_OPT_UNGATE_POST_CHANGE`,
+  and the driver's own comment says zumapro's CMU gates really stop the host
+  clocks, so the clock-stop registers can only be written with the gates
+  open. A resume at `spm_lvl` 5 is a full re-init: if the core's clock
+  gating lands anywhere inside it, the DME commands that link startup sends
+  would time out exactly as the failing console shows, with no first DME
+  set and no power-mode change. That is a hypothesis, not a finding: the
+  ordering in `exynos_ufs_setup_clocks()` is meant to prevent it.
+  The test is cheap and attended: `CLKGATE=0` in
+  `runners/13-s2idle-counted.sh` turns gating off for the run
+  (`clkgate_enable` 0) and the cycles run as usual. One failure in about 50
+  resumes means a clean run of ten proves nothing by itself, so it is worth
+  running both ways and counting.
 - **What the five clean cycles rule out, and what they don't.** Five in a
   row with the storage counters at zero says the UFS resume path is not
   broken per se; the afternoon failure and this hang are both the sixth or
