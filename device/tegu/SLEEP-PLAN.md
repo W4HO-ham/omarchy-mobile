@@ -296,12 +296,28 @@ with the cable in.
   storage shape of the 10-30 afternoon (which kept answering SSH from
   memory): the SoC itself is hung or down, and nothing can be read until a
   forced restart. Waiting on that to read the console from pstore.
+- **Read back from the afternoon's own console (2026-10-30 night, offline):
+  the failing suspend was the third of its boot, not a late one.** The
+  console holds nine suspend entries (387.7 s, 4746.9 s, 10798.6 s, then
+  14328.9 s onwards once the filesystem was already read-only), and the
+  third one, at 10798.6 s, is the one whose resume failed at 10799.8 s. The
+  25 seconds before it contain nothing but PAM and audit lines from an SSH
+  login: no ACPM timeout, no thermal error, no UFS warning. (An earlier
+  note of mine tied that failure to the ACPM timeouts; those are from a
+  different boot, the 18:31 console of the same day, and the link is
+  withdrawn. The ACPM slot leak found while reading that path is real and
+  is linux-omarchy-mobile#152, but it is a separate defect.) So the
+  afternoon failure was the third sleep of its boot at about 3 hours of
+  uptime, and tonight's hang the sixth of its boot at about 10 minutes:
+  neither "the Nth sleep" nor "a long boot" fits both, and what they share
+  is only that neither was the first sleep of its boot.
 - **What the five clean cycles rule out, and what they don't.** Five in a
   row with the storage counters at zero says the UFS resume path is not
   broken per se; the afternoon failure and this hang are both the sixth or
   later sleep of a long-running boot (the afternoon one at uptime 10801 s,
-  this one after five sleeps), so the next question is whether the failure
-  follows the number of sleeps in a boot rather than any single sleep. The
+  this one after five sleeps), so the first guess was the number of sleeps
+  in a boot; the console read below retires that guess, since the afternoon
+  failure was only the third sleep of its boot. The
   three dark no-wakes left no ext4 recovery line in their next boot's
   journal (checked tonight across 25 boots: no boot recovered a journal),
   so they were not the dead-storage shape either, which fits a hang like
