@@ -280,6 +280,32 @@ with the cable in.
   sleep stays off. Next: the UFS resume path with the kmsg stream, and the
   question whether the three dark no-wakes left ext4 recovery lines in
   their next boot's journal (`journalctl -b -N -k | grep EXT4`).
+- **2026-10-30 night, s2idle with the cable in, 20 cycles asked for, 6
+  taken, 1 hang.** Attended RTC-woken 30-second cycles on the daily boot
+  (release `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`, the
+  modem never loaded in that boot, NFC's sleep hook in place, `spm_lvl` 5,
+  `rpm_lvl` 3), each checked for `link startup failed`, `Host init failed`,
+  `I/O error` and `ufshcd_err_handler` before the next one, and for a
+  writable root. Cycles 1-5: all woke, all four counters zero, one suspend
+  entry and one exit each, root writable, the wake each time the RTC with
+  the power key and Wi-Fi's host-wake disarmed again on resume (`wake
+  disabled for irq 59`, `irq 73`). `/sys/power/suspend_stats` read
+  `success=5` with every failure counter zero. The sixth cycle of the same
+  boot did not come back, and this time the palmtop left the USB bus
+  entirely (no gadget, the laptop's interface gone), so it is not the dead-
+  storage shape of the 10-30 afternoon (which kept answering SSH from
+  memory): the SoC itself is hung or down, and nothing can be read until a
+  forced restart. Waiting on that to read the console from pstore.
+- **What the five clean cycles rule out, and what they don't.** Five in a
+  row with the storage counters at zero says the UFS resume path is not
+  broken per se; the afternoon failure and this hang are both the sixth or
+  later sleep of a long-running boot (the afternoon one at uptime 10801 s,
+  this one after five sleeps), so the next question is whether the failure
+  follows the number of sleeps in a boot rather than any single sleep. The
+  three dark no-wakes left no ext4 recovery line in their next boot's
+  journal (checked tonight across 25 boots: no boot recovered a journal),
+  so they were not the dead-storage shape either, which fits a hang like
+  tonight's.
 - A later note on the method: `power-ab`'s CSV columns are
   `voltage_uv,current_ua,current_avg_ua,charge_counter_uah,charge_now_uah`;
   the gauge's `current_avg` is a long filter and says little about a
@@ -357,5 +383,9 @@ step 2 in reverse).
 
 ## Not known yet
 
+- Why a boot's sixth or later s2idle hangs or loses its storage while the
+  first five are clean (2026-10-30 night, above). Next: the cycles again
+  from a fresh boot with the kmsg stream to the laptop, counting sleeps,
+  and the console from the forced restart of tonight's hang.
 - What the GNSS and fingerprint rails cost in sleep (S2).
 - What MIF in sleep saves with the cable out (S1).
