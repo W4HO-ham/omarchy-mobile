@@ -17,12 +17,14 @@ Raw captures, recordings, backups and vendor files remain off repository.
 
 The receiver gets a position fix on the owner's kernel: up to 13 satellites
 used, HDOP 0.8-1.2, GPS, Galileo, BeiDou and GLONASS tracked, CHPP clean
-over 3- and 10-minute sessions with no reset. Two fixes did it: spi-s3c64xx
+for about a minute per boot. Two fixes did it: spi-s3c64xx
 turned the channels off after clearing the packet count, which lost a few
 bits per transfer on a streaming slave (linux-omarchy-mobile#150), and the
-GNSS SPI's pins ran on the bootloader's drive 0 (#151). The CP link hang under
-GNSS traffic goes away with cpif's link held up after ONLINE. Details, the
-configuration and the sweep in [MODEM-PLAN](MODEM-PLAN.md) "G3, resolved".
+GNSS SPI's pins ran on the bootloader's drive 0 (#151). What ends the fix is
+the CP link under GNSS traffic: held up it crashes the CP 103-108 s after
+ONLINE (six boots of six), left to cycle it hangs the SoC about 170 s after
+ONLINE. Details, the configuration and the sweep in
+[MODEM-PLAN](MODEM-PLAN.md) "G3, resolved".
 
 ## 2026-10-29: two resets at about 34 s, right after Bluetooth started
 

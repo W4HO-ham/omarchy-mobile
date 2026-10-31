@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: MIT
 # Pixel 9a bring-up: one GNSS session (MODEM-PLAN G3, resolved). Checks the
 # GNSS rails, starts the modem with GNSS (omamobile-tegu-modem-up --gnss),
-# holds the CP link up once the CP is ONLINE (cpif keep_link_up=1; at load it
-# would keep the CP from booting), starts the gnss-slsi HAL and its client for
+# with HOLD=1 holds the CP link up once the CP is ONLINE (cpif keep_link_up=1,
+# a diagnostic: the CP then crashes 103-108 s later; at load it would keep the
+# CP from booting), starts the gnss-slsi HAL and its client for
 # SECS seconds (default 180), then saves the HAL's NMEA, the SPI dump and the
 # modem log under /var/log/omamobile/g7min.
 # It starts the modem: once per boot. Reboot before running it again.
@@ -17,7 +18,7 @@ for n in gnss-core gnss-rf gnss-aux; do
   [[ -n $r && $(cat "$(dirname "$r")/state") == enabled ]] || { say "STOP: $n"; exit 1; }
 done
 /usr/local/bin/omamobile-tegu-modem-up --gnss || { say "STOP: modem not ONLINE"; exit 1; }
-echo 1 > /sys/module/cpif/parameters/keep_link_up 2>/dev/null && say "link held up from here (keep_link_up=1)"
+[[ ${HOLD:-0} == 1 ]] && echo 1 > /sys/module/cpif/parameters/keep_link_up 2>/dev/null && say "link held up from here (keep_link_up=1; the CP crashes about 105 s after ONLINE)"
 for _ in $(seq 1 120); do pgrep -x gnssd >/dev/null && break; sleep 0.25; done
 pgrep -x gnssd >/dev/null || { say "STOP: no gnssd"; exit 1; }
 dmesg -C

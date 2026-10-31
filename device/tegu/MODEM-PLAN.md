@@ -11,8 +11,11 @@ G1-G2 passed: gnssd loads Kepler's firmware and talks CHPP over SPI;
 The CHPP link lost bits because spi-s3c64xx's flush cleared the packet
 count before turning the channels off
 (derekross/linux-omarchy-mobile#150) and because the GNSS SPI's pins ran on
-the bootloader's drive 0 (#151); the CP link hang under GNSS traffic goes
-away with the link held up after ONLINE. Section "G3, resolved" below.
+the bootloader's drive 0 (#151). Open: the CP link under GNSS traffic. Held
+up (cpif `keep_link_up=1` after ONLINE) the CP crashes 103-108 s after
+ONLINE, six boots of six; left to cycle, the SoC hangs about 170 s after
+ONLINE (the 10-29 hang), so a fix lasts about a minute. Section "G3,
+resolved" below, and G3-L1.
 Left: the GNSS and CPIF drivers aren't in the published kernel, and GNSS
 still starts by hand. Next: the SIM.
 The staged plan (sections F, K, U and runbooks M0.2-M6, G1-G4) is below,
@@ -982,17 +985,26 @@ does swapping in gnss_spi (`word32=2`, commit 734f5f8c8 on
 errors, on a boot without the swap-mode property. The palmtop runs the
 software swap.
 
-**The CP link hang under GNSS traffic, G3-L1's first step answered.** With
-GNSS running for minutes, the hang of 10-29 came back once
-(CLUSTER0_NONCPU_WDTRESET about 260 s into a session, after 62 fixes).
-cpif's `keep_link_up` (bring-up module `cpif-keep-link.ko`, branch
-`tegu-cpif-keep-link`, 3f76f123b) set at load keeps the CP from ever reaching
-ONLINE (`cbd exit 143 and the CP is BOOTING`): the CP needs its link
-power cycles while it boots. The parameter is writable at runtime (0644); set
-after ONLINE, the link is never isolated again, and both sessions above ran
-with it. So the hang is a link-down access while GNSS traffic flows, as the
-10-29 console reading said; holding the link after ONLINE is the bring-up
-answer until CPIF's power-off path is made safe.
+**The CP link under GNSS traffic, G3-L1's first step answered, and a
+correction.** With GNSS running for minutes on the normal boot, the hang of
+10-29 came back once (CLUSTER0_NONCPU_WDTRESET about 260 s into the boot,
+170 s after ONLINE, after 62 fixes). cpif's `keep_link_up` (bring-up module
+`cpif-keep-link.ko`, branch `tegu-cpif-keep-link`, 3f76f123b) set at load
+keeps the CP from ever reaching ONLINE (`cbd exit 143 and the CP is
+BOOTING`): the CP needs its link power cycles while it boots. Set after
+ONLINE (the parameter is 0644), no hang followed, and that is as far as the
+good news goes: in every one of the six boots that held the link (18:31 to
+19:31), `cp_active_handler` saw PHONE_ACTIVE drop 103-108 s after ONLINE
+(`ONLINE -> CRASH_EXIT`, the CP's own crash, nothing in the kernel log
+before it, CHPP healthy: 9 bad checksums in thousands of frames), gnssd went
+into crash handling and the modem profile stopped. The sessions first
+reported as clean 3- and 10-minute runs were not: their 38-56 GGA sentences
+are about a minute of fixes before that crash, which the counting (fixed of
+total) hid. So: the hang is a link-down access while GNSS traffic flows, as
+the 10-29 console reading said, and refusing the CP's power-down crashes
+the CP about 105 s later. `keep_link_up` is a diagnostic, not an answer;
+the answer is in CPIF's power-off path (G3-L1's trace: which BAR access
+lands after isolation), so that the link may cycle as the CP asks.
 
 **How the sweep got there** (runners in the owner's
 `logs/tegu-review-20261029/runners/05-g3a*.sh`, not in git):
@@ -1013,11 +1025,12 @@ answer until CPIF's power-off path is made safe.
 
 **Left for GNSS:** the GNSS link driver (gnssif) and CPIF aren't in the
 published kernel, so this runs on the owner's kernel only; #150 and #151 are
-open; the link hold is a runtime parameter of a bring-up CPIF build, and a
-proper fix belongs in CPIF's power-off path; GNSS still starts by hand
+open; the CP link under GNSS traffic is unsolved (above: the hold crashes
+the CP, the cycling hangs the SoC), so a fix lasts about a minute per boot
+until CPIF's power-off path is made safe; GNSS still starts by hand
 ([`bringup/tegu-gnss-session`](bringup/tegu-gnss-session), which starts the
-modem, holds the link after ONLINE and runs the HAL for a set time; once per
-boot). The bring-up start script
+modem, holds the link after ONLINE for the diagnostic and runs the HAL for a
+set time; once per boot). The bring-up start script
 [`bringup/omamobile-tegu-modem-up`](bringup/omamobile-tegu-modem-up) loads
 `cpif-keep-link.ko keep_link_up=0` and `gnss_spi.ko word32=2 piece=64
 spi_mode=0`.
