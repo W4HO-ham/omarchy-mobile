@@ -1080,6 +1080,43 @@ head/tail if any of them sit in the window rather than in the reserved
 DRAM), and the cycle itself, each step of which writes the PMU through the
 secure monitor. That is G3-L1's trace, and it is next.
 
+**Every register path in the cycling window, audited from the source
+(2026-10-30 night, offline).** With the doorbell fixed and the hang still
+there at 26 minutes, the obvious next question is which other access lands
+after isolation. Reading all of them says: none that is unguarded.
+
+- The modem driver's shared-memory reads are not in the BAR window at all.
+  `mld->base` comes from `cp_shmem_get_region()` / `cp_shmem_get_nc_region()`
+  (`shm_ipc.c`, `memremap()` of the reserved DRAM), so the boot indicator,
+  the magic and capability words and the queue head/tail are plain DRAM and
+  safe while the link is down.
+- Every DBI access goes through `cp_dbi_read()` / `cp_dbi_write()`
+  (`.read_dbi` / `.write_dbi` of `cp_dw_ops`), which take `dbi_lock` and do
+  nothing unless `dbi_ok`. That covers the per-queue MSI handlers'
+  `dw_pcie_readl_dbi()`, which fire on exactly this traffic.
+- The link's own interrupt handler, `cp_ctrl_irq_handler()`, takes
+  `cfg_lock` and returns `IRQ_NONE` unless `cfg_root_ok`; `cp_ctrl_irq(cp,
+  false)` uses `disable_irq()`, which waits for a handler already running,
+  and it runs first in `cp_link_down()`.
+- Configuration space, root and endpoint, is behind `cfg_root_ok` and
+  `cfg_ep_ok` under the same lock, which `cp_link_down()` clears before it
+  touches PERST#, the PHY or the isolation.
+- `gs201_pcie_cp_link_ok()` and `gs201_pcie_cp_dump()` read ELBI under
+  `cfg_lock` with `cfg_root_ok` checked.
+- The doorbell was the one exception, and it is fixed (branch
+  `tegu-cpif-doorbell`, in `gs201_pcie_cp_doorbell()`).
+
+So the remaining hang is most likely not a stray register read but
+something that accumulates over the cycles themselves: about 3000 of them
+in the 26 minutes that session lasted, each with a PMU write through the
+secure monitor, a `phy_init()` / `phy_exit()` pair, an MSI re-arm and a
+root-port window restore. G3-L1's trace should therefore number the cycles
+and log each step's entry, so the console says which step of which cycle
+stopped, rather than hunting a read that the audit above says is not
+there. The interrupt enable and disable calls are paired behind
+`ctrl_irq_on` and `msi_irqs_on`, so a plain enable/disable imbalance is
+out.
+
 The bring-up start script
 [`bringup/omamobile-tegu-modem-up`](bringup/omamobile-tegu-modem-up) loads
 `cpif-keep-link.ko keep_link_up=0` and `gnss_spi.ko word32=2 piece=64
