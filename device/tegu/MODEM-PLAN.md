@@ -7,15 +7,14 @@ modem's cp2ap lines) is bound with its EINTs in the base DT
 trains Gen1 x1 and enumerates as 144d:a5a5; M3-M5 passed: CPIF and cbd
 boot it to **ONLINE** (Gen3 x2) with working IPC (pktproc), no SIM yet;
 G1-G2 passed: gnssd loads Kepler's firmware and talks CHPP over SPI;
-G3 partial: our HAL client starts sessions and the engine tracks
-satellites, but the CHPP link over the GNSS SPI loses bytes and gnssd's
-own watchdog resets Kepler (the "hardfault"); the clock and the transfer
-cut are in derekross/linux-omarchy-mobile#138 (in review), and GNSS is parked without a
-hardware probe (the owner's decision, 2026-10-29); G3-A (automatic chip
-select, 2026-10-30) ended in the same CHPP failure with clean checksums, and
-G3-A2 (32-bit words with the controller's swap) is the one boot left to
-build. The CP link hang with frequent Kepler resets is open. Next: a stock
-GNSS capture, IOCC, the SIM.
+**G3 resolved (2026-10-30, evening): a position fix on the owner's kernel.**
+The CHPP link lost bits because spi-s3c64xx's flush cleared the packet
+count before turning the channels off
+(derekross/linux-omarchy-mobile#150) and because the GNSS SPI's pins ran on
+the bootloader's drive 0 (#151); the CP link hang under GNSS traffic goes
+away with the link held up after ONLINE. Section "G3, resolved" below.
+Left: the GNSS and CPIF drivers aren't in the published kernel, and GNSS
+still starts by hand. Next: the SIM.
 The staged plan (sections F, K, U and runbooks M0.2-M6, G1-G4) is below,
 with each step's results under it. Kernel branches `omamobile-tegu-modem` and `omamobile-tegu-gnssif`
 (section K).
@@ -936,6 +935,92 @@ ff9aceacb40286f6) and a gnss_spi variant that asks for 32-bit words and
 does no software swap, which is not built yet. One session, no reset: this
 was G3-A's own one DTB round, not a G3-L1 session, so the trace's cap of
 three sessions and two resets is untouched. GNSS stays parked otherwise.
+
+### G3, resolved: a fix (2026-10-30, evening, `7.3.0-rc6-omamobile-tegu-s2mpg15-m1-g991042e2eff3-dirty`)
+
+[V] **The receiver gets a position fix.** On the owner's kernel with the
+two fixes below and stock's SPI configuration: a 3-minute session by a
+window with 36 of 38 GGA sentences at fix quality 1, 13 satellites used,
+HDOP 0.8; a 10-minute session with 38 of 43 fixed, 10-13 satellites, HDOP
+about 1; GPS, Galileo, BeiDou and GLONASS tracked at C/N0 up to about
+41 dB-Hz. CHPP clean in both: no ACK timeout, no bad checksum, no permanent
+failure, no Kepler fault, no CP link isolation, no UFS error, no reset (11
+minutes of uptime at the end of the long one). No position or height is
+recorded here.
+
+**Cause 1, the flush order (kernel, [linux-omarchy-mobile#150](https://github.com/derekross/linux-omarchy-mobile/pull/150)).**
+`s3c64xx_flush_fifo()` cleared PACKET_CNT, and with it PACKET_CNT_EN, while
+RXCH_ON was still set. For that one write the controller received with no
+packet count and ran SCK freely, and with automatic chip select the slave
+stayed selected and shifted out bits the flush threw away. Kepler streams
+CHPP across chip-select cycles, so every transfer lost 2-6 bits: each read
+arrived at a different bit offset (0, 2, 4 or 6, changing from read to read),
+the data inside a read was intact, and frames that crossed reads failed
+their CRC. Google's driver turns the channels off first; #150 does the same.
+Found by comparing Google's and mainline's transfer paths register write by
+register write, after the sweep below had shown the slip per transfer.
+
+**Cause 2, the pins (DT, [linux-omarchy-mobile#151](https://github.com/derekross/linux-omarchy-mobile/pull/151)).**
+SPI21 had no pinctrl, so the bus ran on the bootloader's pin state, read
+from PERIC1's pin registers on the palmtop: gpp22-0..3 in function 2 at
+drive 0, gpp22-2 (data in) pulled down. With drive 3 (as gpp21, the other
+SPI bus on PERIC1, the touchscreen's) the data inside each read became
+clean; with the flush fix as well, every read arrived at bit 0 with a valid
+CRC32. #151 describes the pins in the board DT; the palmtop uses
+[`overlays/gnss-spi-pins.dtso`](overlays/gnss-spi-pins.dtso) until it lands.
+
+**The configuration that works is stock's**: SPI mode 0 (stock's node has
+no spi-cpha or spi-cpol), 32-bit words, feedback delay 0
+([`overlays/gnss-spi-fb0.dtso`](overlays/gnss-spi-fb0.dtso)), automatic chip
+select ([`overlays/gnss-spi-autocs.dtso`](overlays/gnss-spi-autocs.dtso), the
+`google,gs101-spi` compatible), 64-byte reads (`gnss_spi piece=64`, one
+transfer that fills the FIFO, polled whole since #138), no software realign.
+**The byte swap needs no new DT property**: Google's `swap-mode` (the
+controller's SWAP_CFG, commit 11ea0ef5e on the bring-up branch) works, and so
+does swapping in gnss_spi (`word32=2`, commit 734f5f8c8 on
+`tegu-gnss-spi-bringup`): 54 of 56 GGA fixed, 10 satellites, HDOP 1.2, no
+errors, on a boot without the swap-mode property. The palmtop runs the
+software swap.
+
+**The CP link hang under GNSS traffic, G3-L1's first step answered.** With
+GNSS running for minutes, the hang of 10-29 came back once
+(CLUSTER0_NONCPU_WDTRESET about 260 s into a session, after 62 fixes).
+cpif's `keep_link_up` (bring-up module `cpif-keep-link.ko`, branch
+`tegu-cpif-keep-link`, 3f76f123b) set at load keeps the CP from ever reaching
+ONLINE (`cbd exit 143 and the CP is BOOTING`): the CP needs its link
+power cycles while it boots. The parameter is writable at runtime (0644); set
+after ONLINE, the link is never isolated again, and both sessions above ran
+with it. So the hang is a link-down access while GNSS traffic flows, as the
+10-29 console reading said; holding the link after ONLINE is the bring-up
+answer until CPIF's power-off path is made safe.
+
+**How the sweep got there** (runners in the owner's
+`logs/tegu-review-20261029/runners/05-g3a*.sh`, not in git):
+- G3-A2: 32-bit words with swap-mode; the first Image, built from the GNSS
+  worktree, lacked the S2MPG15 regulator work (6 regulators instead of 28,
+  no GNSS rails) and was rebuilt from the gn3 tree. The reads showed the
+  reply frames intact but 2, 4 and 6 bits late in successive reads.
+- SPI modes 0-3 (a `spi_mode` override in gnss_spi): mode 3 brought the link
+  up once (24 frames), but marginally; the same boot again failed.
+- Feedback delays 1-3 with mode 3: a stable offset per boot (1 or 3 bits),
+  different from boot to boot.
+- Software realign in gnss_spi: `realign=3` (offset found from each read's
+  preamble) got 86 of 173 frames valid; `realign=4` (carrying the bits
+  across reads) made it worse, which showed the stream isn't continuous
+  across reads, so bits were being lost between transfers.
+- The pins at drive 3: frames inside a read clean, offsets still changing.
+- The flush order: offsets gone, link up, a fix.
+
+**Left for GNSS:** the GNSS link driver (gnssif) and CPIF aren't in the
+published kernel, so this runs on the owner's kernel only; #150 and #151 are
+open; the link hold is a runtime parameter of a bring-up CPIF build, and a
+proper fix belongs in CPIF's power-off path; GNSS still starts by hand
+([`bringup/tegu-gnss-session`](bringup/tegu-gnss-session), which starts the
+modem, holds the link after ONLINE and runs the HAL for a set time; once per
+boot). The bring-up start script
+[`bringup/omamobile-tegu-modem-up`](bringup/omamobile-tegu-modem-up) loads
+`cpif-keep-link.ko keep_link_up=0` and `gnss_spi.ko word32=2 piece=64
+spi_mode=0`.
 
 ### Suspend with the modem on (2026-10-27, early morning, same kernel)
 
