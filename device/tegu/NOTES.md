@@ -85,6 +85,13 @@ list below:
   sleeps have not woken, so sleep tests stay attended (SLEEP-PLAN S1); the
   drain is the S1 figure.
 - **Speakers:** the -10 dB ceiling recorded below, by hand with the AoC.
+- **GNSS, 2026-10-30 evening:** a position fix on a bring-up kernel (the gn3
+  tree with the spi-s3c64xx swap-mode change and the flush-order fix of
+  linux-omarchy-mobile#137, the GNSS SPI's pins at function 2, drive 3, mode
+  0, 32-bit words, feedback delay 0, automatic chip select, 64-byte reads):
+  in a 3-minute session by a window, 23 of 25 GGA sentences with fix quality
+  1, up to 13 satellites used, HDOP 0.8, every CHPP read at bit 0 with a
+  valid CRC; started by hand through the modem bring-up, not by a package.
 
 ## 2026-10-28, evening: USB-C host mode through TCPM
 
