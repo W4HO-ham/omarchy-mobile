@@ -1058,6 +1058,28 @@ un-isolate twice a second, each with its PMU write through the secure
 monitor). The trace of G3-L1 is the next step, now with the doorbell ruled
 out.
 
+**The CP link, three ways, none of them good (2026-10-30 night, same
+kernel plus the doorbell commit).** `keep_link_up` now takes a value, and
+each one fails differently, which between them says what the link is for:
+
+| cpif `keep_link_up` | What the link does | Result |
+| --- | --- | --- |
+| 0 | cycles twice a second under GNSS traffic | fixes arrive; the SoC hangs. About 170 s after ONLINE without the doorbell commit (five boots); with it, one session reached 26 minutes of uptime before the same `CLUSTER0_NONCPU_WDTRESET`, the console ending mid-cycle right after `wake enabled for irq 96` |
+| 1 | held up, `ap2cp_wakeup` left high | fixes arrive for about a minute; the CP crashes 103-108 s after ONLINE (`PHONE_ACTIVE` drops, `ONLINE -> CRASH_EXIT`), six boots of six |
+| 2 | held up, `ap2cp_wakeup` answered as the full path does | nothing hangs and nothing crashes: 16 minutes with the modem ONLINE, no isolation, no UFS error. And no GNSS at all: `gnss_spi` transferred nothing all boot, the HAL reported status 1 and 3 and served no sentence |
+
+So `ap2cp_wakeup` is not a formality: high means the AP wants the link, and
+the CP stops serving GNSS when it goes low, while leaving it high with the
+link held makes the CP declare a fault. The link has to cycle, and the
+answer is to make the cycling safe. The doorbell commit moved the hang from
+170 s to 26 minutes, so that access was one of the unguarded ones but not
+the last. What is left in the window: the MSI set-up and
+`s51xx_pcie_restore_state()` on the way up, CPIF's own BAR reads
+(`offset_boot_indicator`, the capability and magic words, the queue
+head/tail if any of them sit in the window rather than in the reserved
+DRAM), and the cycle itself, each step of which writes the PMU through the
+secure monitor. That is G3-L1's trace, and it is next.
+
 The bring-up start script
 [`bringup/omamobile-tegu-modem-up`](bringup/omamobile-tegu-modem-up) loads
 `cpif-keep-link.ko keep_link_up=0` and `gnss_spi.ko word32=2 piece=64
