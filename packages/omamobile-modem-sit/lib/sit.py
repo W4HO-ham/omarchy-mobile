@@ -98,6 +98,8 @@ class Sit:
         self.token = int.from_bytes(os.urandom(4), 'little') & 0x7fffffff
         self.buffer = bytearray()
         self.indications = deque()
+        self.pending = {}
+        self.responses = {}
 
     def close(self):
         os.close(self.fd)
@@ -130,26 +132,67 @@ class Sit:
             if len(self.buffer) > 65536:
                 raise RuntimeError('SIT receive limit exceeded')
 
-    def request(self, ident, payload=b'', timeout=8, *, manifest_reply=False):
+    def begin(self, ident, payload=b'', timeout=8, *, manifest_reply=False):
+        """Send without waiting; only this transport's owner may call it, and
+        it is the only send path: request() goes through it, so check() sees
+        every request with all its arguments.
+
+        Used for a second bearer so calls/SMS still get serviced during the
+        modem's potentially 45-second data setup. No extra channel or thread.
+        """
         check(ident, sms=getattr(self, 'allow_sms', False),
               calls=getattr(self, 'allow_calls', False),
               manifest=manifest_reply and getattr(self, 'allow_manifest', False),
               isim_pcscf=getattr(self, 'allow_isim_pcscf', False), payload=payload)
+        if len(self.pending) >= 8:
+            raise RuntimeError('too many pending SIT requests')
         self.token = (self.token + 1) & 0xffffffff
-        data = struct.pack('<BBHHIBB', 0, 0, ident, 12 + len(payload), self.token, 0, 0) + payload
-        if os.write(self.fd, data) != len(data):
-            raise RuntimeError('short SIT write')
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            packet = self.read_packet(deadline - time.monotonic())
-            if packet is None:
-                break
-            kind, _, message, length = struct.unpack_from('<BBHH', packet)
-            if kind == 2:
-                # Physical-channel and signal-strength reports are snapshots.
-                # Retain the latest of each during long requests so frequent
-                # telemetry cannot exhaust the queue ahead of an SMS reply.
-                # SMS, calls, registration and all other events keep FIFO order.
+        token = self.token
+        data = struct.pack('<BBHHIBB', 0, 0, ident, 12 + len(payload), token, 0, 0) + payload
+        self.pending[token] = (ident, time.monotonic() + timeout)
+        try:
+            if os.write(self.fd, data) != len(data):
+                raise RuntimeError('short SIT write')
+        except BaseException:
+            del self.pending[token]
+            raise
+        return token
+
+    def receive_response(self, packet):
+        token = struct.unpack_from('<I', packet, 6)[0]
+        pending = self.pending.get(token)
+        if pending and struct.unpack_from('<H', packet, 2)[0] == pending[0]:
+            self.responses.setdefault(token, packet)
+
+    def finish(self, token):
+        """None while pending, bytes when complete; timeout is not a retry."""
+        ident, deadline = self.pending[token]
+        packet = self.responses.pop(token, None)
+        if packet is not None:
+            del self.pending[token]
+            print(f'SIT {name(ident)}: error={packet[10]} length={len(packet)}', flush=True)
+            if packet[10]:
+                raise ModemError(packet[10], packet[12:])
+            return packet[12:]
+        if time.monotonic() >= deadline:
+            del self.pending[token]
+            raise TimeoutError(f'SIT {name(ident)}')
+        return None
+
+    def request(self, ident, payload=b'', timeout=8, *, manifest_reply=False):
+        token = self.begin(ident, payload, timeout, manifest_reply=manifest_reply)
+        try:
+            while True:
+                result = self.finish(token)
+                if result is not None:
+                    return result
+                packet = self.read_packet(max(0, self.pending[token][1] - time.monotonic()))
+                if packet is None:
+                    continue
+                if packet[0] == 1:
+                    self.receive_response(packet)
+                    continue
+                message = struct.unpack_from('<H', packet, 2)[0]
                 if message in (0x0742, 0x0906):
                     for old in self.indications:
                         if struct.unpack_from('<H', old, 2)[0] == message:
@@ -158,12 +201,9 @@ class Sit:
                 if len(self.indications) >= 256:
                     raise RuntimeError('unprocessed indication limit exceeded')
                 self.indications.append(packet)
-            elif message == ident and struct.unpack_from('<I', packet, 6)[0] == self.token:
-                print(f'SIT {name(ident)}: error={packet[10]} length={length}', flush=True)
-                if packet[10]:
-                    raise ModemError(packet[10], packet[12:])
-                return packet[12:]
-        raise TimeoutError(f'SIT {name(ident)}')
+        finally:
+            self.pending.pop(token, None)
+            self.responses.pop(token, None)
 
     def next_indication(self, timeout=1):
         if self.indications:
@@ -173,4 +213,5 @@ class Sit:
             packet = self.read_packet(deadline - time.monotonic())
             if packet is None or packet[0] == 2:
                 return packet
+            self.receive_response(packet)
         return None

@@ -334,6 +334,54 @@ finally:
                          set(requests[setup_indices[1] + 1:]))
         self.assertFalse([e for e in entries if 'violation' in e])
 
+    def test_runtime_mms_controller_against_simulator(self):
+        self.start('--search-polls', '0', daemon=False)
+        script = """
+import sys, time
+sys.path.insert(0, sys.argv[1])
+from unittest.mock import patch
+import at, data_call, mms
+from sit import Sit
+client = Sit(allow_calls=True)
+try:
+    at.radio(True)
+    client.request(0x0748, b'\\0')
+    data_call.activate(client, 'internet.example')
+    original = {p: p.read_bytes() for p in data_call.paths(1)}
+    with patch.object(mms, 'Network') as network:
+        network.return_value.start.return_value = dict(interface='rmnet2', address='192.0.2.2', dns=['192.0.2.53'])
+        controller = mms.MMS(client, dict(apn='mms.example', ip_type='ipv4'))
+        assert controller.connect()['state'] == 'connecting'
+        # A call query while SETUP is in flight must not discard its reply.
+        assert client.request(0x0000) == bytes(4)
+        end = time.monotonic() + 5
+        while controller.state == 'connecting' and time.monotonic() < end:
+            client.next_indication(.02)
+            controller.tick()
+        assert controller.state == 'connected', controller.status()
+        controller.disconnect()
+        end = time.monotonic() + 5
+        while controller.state == 'disconnecting' and time.monotonic() < end:
+            client.next_indication(.02)
+            controller.tick()
+        assert controller.state == 'disconnected', controller.status()
+        controller.close()
+    assert data_call.call_ids(client.request(0x0602)) == {1}
+    assert all(p.read_bytes() == content for p, content in original.items())
+finally:
+    client.close()
+"""
+        result = subprocess.run([sys.executable, '-c', script, str(HERE.parent / 'lib')],
+                                env=self.env, capture_output=True, text=True, timeout=40)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        entries = self.transcript_entries()
+        setups = [e for e in entries if e.get('event') == 'setup_data_call']
+        self.assertEqual([(e['cid'], e['apn_types']) for e in setups], [(1, 1), (3, 2)])
+        requests = [e['id'] for e in entries if e.get('type') == 'req']
+        first = requests.index(0x0600)
+        self.assertFalse({0x0603, 0x0613, 0x0625, 0x0710, 0x061a, 0x061b} & set(requests[first+1:]))
+        self.assertFalse([e for e in entries if 'violation' in e])
+
     def test_probe_is_read_only(self):
         self.start(daemon=False)
         probe = subprocess.run([sys.executable, str(BIN / 'omamobile-sitd'), '--probe'], env=self.env,

@@ -3,8 +3,8 @@
 owned bearer lifecycle: CID 1 (internet), CID 2 (IMS) and opt-in CID 3
 (MMS). Stock names a bearer's device rmnet<CID - 1>; data_network.find_device
 checks which device really carries the internet bearer (it differed when the
-attach bearer was on another APN). MMS is a library primitive only: start-up
-does not request it and no socket method exposes it yet.
+attach bearer was on another APN). Start-up does not request MMS; mms.py
+provides its asynchronous lifecycle to the running daemon.
 
 The APN comes from /etc/omamobile/modem-sit.conf. Ownership is recorded in
 RAM before a setup is sent: a setup or release with an unknown outcome

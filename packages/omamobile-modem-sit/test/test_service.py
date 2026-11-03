@@ -60,6 +60,49 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(len(listed),1)
         self.assertEqual((listed[0]['number'],listed[0]['text'],listed[0]['data']),('+12025550123','',b''.join(pieces).hex()))
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM parts').fetchone()[0],0)
+    def test_wap_port_only_in_first_part_arriving_last(self):
+        inbox = self.root/'inbox'; inbox.mkdir()
+        for seq, body in ((2, b'\x00\xffsecond'), (1, b'\x01\x06first')):
+            header = (bytes.fromhex('0b05040b8423f00003090201') if seq == 1
+                      else bytes.fromhex('050003090202'))
+            ud = header + body
+            tpdu = bytes.fromhex('440b912120550521f3000462909221436500') + bytes([len(ud)]) + ud
+            data = b'\0' + tpdu
+            path = inbox/f'{seq}.sit'
+            path.write_bytes(bytes(2)+struct.pack('<H',0x0d1e)+bytes(5)+bytes([len(data)])+data)
+            self.service.ingest(path)
+            if seq == 2:
+                self.assertEqual(self.service.dispatch(dict(action='sms-list')), [])
+        rows = self.service.dispatch(dict(action='sms-list'))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['text'], '')
+        self.assertEqual(bytes.fromhex(rows[0]['data']), b'\x01\x06first\x00\xffsecond')
+        self.service.ingest(path)
+        self.assertEqual(len(self.service.dispatch(dict(action='sms-list'))), 1)
+
+    def test_old_partial_wap_record_keeps_port_during_database_upgrade(self):
+        import sqlite3
+        path = self.root/'old.db'
+        old = sqlite3.connect(path)
+        old.executescript("CREATE TABLE parts (id TEXT PRIMARY KEY, sender TEXT, reference INTEGER, total INTEGER, seq INTEGER, text TEXT, timestamp TEXT, received REAL, data TEXT NOT NULL DEFAULT '');")
+        old.execute('INSERT INTO parts VALUES (?,?,?,?,?,?,?,?,?)',
+                    ('fragment', '+12025550123', 9, 2, 1, '', '', 0, '0106'))
+        old.commit(); old.close()
+        upgraded = app_service.database(path)
+        try:
+            self.assertEqual(upgraded.execute('SELECT port FROM parts').fetchone()[0], 2948)
+        finally:
+            upgraded.close()
+
+    def test_mms_private_status_is_not_written_to_public_state(self):
+        self.service.mms.state = 'connected'
+        self.service.mms.config = dict(address='192.0.2.3', dns=['192.0.2.53'], interface='rmnet2')
+        self.assertNotIn('mms', self.service.status(public=True))
+        self.assertEqual(self.service.status()['mms']['address'], '192.0.2.3')
+        self.service.new_call('+12025550123', 'incoming', 'ringing-in', 1)
+        with self.assertRaises(RuntimeError):
+            self.service.dispatch(dict(action='mms-connect'))
+
     def test_restart_does_not_retry_pending_sms(self):
         self.db.execute('INSERT INTO outgoing VALUES (?,?,?,?,?)',('a'*32,'digest','sending','',0)); self.db.commit()
         other=app_service.database(self.root/'db')

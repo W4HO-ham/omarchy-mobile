@@ -45,6 +45,7 @@ from at import radio
 from calls import call_status, dial_payload, ring
 from data_call import paths as bearer_paths
 from ims import REGISTRATION, record_registration
+from mms import MMS
 from inbox import persist_sms
 from sit import Sit, ModemError
 from sms_codec import submit, received_pdu, number
@@ -157,6 +158,11 @@ def database(path):
     for table in ('received', 'parts'):
         if 'data' not in {c[1] for c in db.execute(f'PRAGMA table_info({table})')}:
             db.execute(f"ALTER TABLE {table} ADD COLUMN data TEXT NOT NULL DEFAULT ''")
+    if 'port' not in {c[1] for c in db.execute('PRAGMA table_info(parts)')}:
+        db.execute('ALTER TABLE parts ADD COLUMN port INTEGER')
+        # Before this migration, only recognised WAP fragments had Data.
+        # Preserve a first fragment received before upgrading the daemon.
+        db.execute("UPDATE parts SET port=2948 WHERE data<>''")
     # A request interrupted by a process restart must never be retried blindly.
     db.execute("UPDATE outgoing SET state='unknown', error='Delivery uncertain after service restart; check with the recipient' WHERE state='sending'")
     db.commit()
@@ -206,6 +212,7 @@ class Service:
         self.db = db
         self.settings = settings or paths.config()
         self.calls = {}
+        self.mms = MMS(client, self.settings['mms'])
         self.audio = None
         self.muted = False
         self.pending = None
@@ -306,17 +313,21 @@ class Service:
                 return
             concat = sms.pop('concat')
             data = sms.pop('data').hex()
-            sms.pop('port')
+            port = sms.pop('port')
             if concat:
                 ref, total, seq = concat
-                self.db.execute('INSERT OR IGNORE INTO parts(id,sender,reference,total,seq,text,timestamp,received,data) VALUES (?,?,?,?,?,?,?,?,?)',
-                                (key, sms['number'], ref, total, seq, sms['text'], sms['timestamp'], time.time(), data))
+                self.db.execute('INSERT OR IGNORE INTO parts(id,sender,reference,total,seq,text,timestamp,received,data,port) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                                (key, sms['number'], ref, total, seq, sms['text'], sms['timestamp'], time.time(), data, port))
                 parts = self.db.execute('SELECT * FROM parts WHERE sender=? AND reference=? AND total=? AND received>? ORDER BY received',
                                         (sms['number'], ref, total, time.time()-86400)).fetchall()
                 by_seq = {p['seq']: p for p in parts}
                 if len(by_seq) == total:
                     sms['text'] = ''.join(by_seq[i]['text'] for i in range(1, total+1))
                     data = ''.join(by_seq[i]['data'] for i in range(1, total+1))
+                    ports = {p['port'] for p in by_seq.values() if p['port'] is not None}
+                    if data and ports != {2948}:
+                        data = ''
+                        sms['text'] = 'Received an unsupported binary message.'
                     sms['timestamp'] = by_seq[1]['timestamp']
                     self.db.execute('INSERT OR IGNORE INTO received(id,number,text,timestamp,data) VALUES (?,?,?,?,?)',
                                     (key, sms['number'], sms['text'], sms['timestamp'], data))
@@ -341,6 +352,13 @@ class Service:
         elif ident == 0x0d05:
             record_registration(packet)
             self.publish()
+        elif ident == 0x0604:
+            # IND_DATA_CALL_LIST_CHANGED: an unsolicited loss removes the
+            # MMS host route; it never changes internet/IMS permissions.
+            try:
+                self.mms.observe_calls(packet[8:])
+            except ValueError:
+                print('Unrecognised data-call list indication', flush=True)
         elif ident == 0x0802:
             # IND_RADIO_STATE_CHANGED: u32 at 0x08. Re-read the network too.
             if len(packet) >= 12:
@@ -549,7 +567,7 @@ class Service:
             unread = self.db.execute('SELECT COUNT(*) FROM received WHERE consumed=0').fetchone()[0]
             return dict(modem=modem, calls=calls, sms=dict(unread=unread), updated=int(time.time()))
         received = [r[0] for r in self.db.execute('SELECT id FROM received WHERE consumed=0 ORDER BY rowid')]
-        return dict(modem=modem, calls=calls, sms=dict(received=['sit:' + i for i in received]),
+        return dict(mms=self.mms.status(), modem=modem, calls=calls, sms=dict(received=['sit:' + i for i in received]),
                     audio=dict(available=True, running=self.audio is not None, mute=self.muted,
                                speaker=getattr(self.audio, 'tegu', False) is True,
                                speaker_available=False, error=''))
@@ -664,6 +682,10 @@ class Service:
             row = self.db.execute('SELECT state,error,completed FROM outgoing WHERE id=?',
                                   (request.get('request_id'),)).fetchone()
             return dict(row) if row else dict(state='unknown', error='Send outcome has not been confirmed')
+        if action in ('mms-connect', 'mms-disconnect'):
+            if self.live():
+                raise RuntimeError('End the call before changing the MMS bearer')
+            return self.mms.connect() if action == 'mms-connect' else self.mms.disconnect()
         if action == 'dial':
             self.ready(1)
             if self.live():
@@ -915,6 +937,7 @@ def main():
             packet = client.next_indication(.05)
             if packet:
                 service.event(packet)
+            service.mms.tick()
             service.reap()
             service.broadcast()
             try:
@@ -945,6 +968,7 @@ def main():
             try:
                 if service:
                     service.audio_stop()
+                    service.mms.close()
             finally:
                 if service:
                     for connection in list(service.subscribers):

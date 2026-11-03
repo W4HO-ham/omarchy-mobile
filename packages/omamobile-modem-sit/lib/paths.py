@@ -34,6 +34,7 @@ DEFAULTS = {
                 'nr': 'off', 'sim_timeout': '120', 'register_timeout': '180'},
     # Extra modem-managed data profiles, one per line (data_call.parse_profile).
     'profiles': {},
+    'mms': {'apn': '', 'ip_type': 'ipv4'},
     'data': {'route': 'yes', 'metric': '700'},
     'control': {'group': 'wheel'},
     'audio': {'card': 'none', 'mic_boost_db': '6', 'tegu_route': 'speaker', 'tegu_aec': 'no'},

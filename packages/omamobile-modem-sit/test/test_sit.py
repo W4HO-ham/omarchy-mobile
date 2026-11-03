@@ -22,10 +22,46 @@ class TransportTests(unittest.TestCase):
         self.client.token = 100
         self.client.buffer = bytearray()
         self.client.indications = deque()
+        self.client.pending = {}
+        self.client.responses = {}
 
     def tearDown(self):
         self.local.close()
         self.peer.close()
+
+    def test_refusals_hold_through_both_send_paths(self):
+        denied = next(iter(sit.DENIED))
+        cases = [(denied, b'', {}, 'do-not-send'),
+                 (sit.SIM_IO, b'\0' * 8, {}, 'allow-list'),                       # not opened for ISIM
+                 (sit.MANIFEST, b'', {}, 'do-not-send'),                         # no manifest prompt
+                 (sit.MANIFEST, b'', {'manifest_reply': True}, 'do-not-send')]   # prompt, owner not opened
+        for ident, payload, extra, reason in cases:
+            for send in (self.client.request, self.client.begin):
+                with self.subTest(ident=hex(ident), send=send.__name__):
+                    with self.assertRaisesRegex(ValueError, reason):
+                        send(ident, payload, timeout=0.1, **extra)
+        # Opened for the ISIM: any SIM_IO other than the EF_PCSCF read is still refused
+        self.client.allow_isim_pcscf = True
+        for send in (self.client.request, self.client.begin):
+            with self.subTest(send=send.__name__), self.assertRaises(ValueError):
+                send(sit.SIM_IO, b'\xff' * 8, timeout=0.1)
+        self.assertEqual(self.client.pending, {})
+        with self.assertRaises(BlockingIOError):
+            self.peer.recv(4096, socket.MSG_DONTWAIT)                            # nothing was sent
+
+    def test_pending_data_response_survives_a_call_request_and_indications(self):
+        token = self.client.begin(0x0600, b'test', timeout=45)
+        self.peer.recv(4096)
+        def response():
+            request = self.peer.recv(4096)
+            call_token = struct.unpack_from('<I', request, 6)[0]
+            self.peer.sendall(struct.pack('<BBHHIBB', 1, 0, 0x0600, 16, token, 0, 0) + b'data')
+            self.peer.sendall(struct.pack('<BBHHIBB', 1, 0, 0x0000, 16, call_token, 0, 0) + bytes(4))
+        worker = threading.Thread(target=response)
+        worker.start()
+        self.assertEqual(self.client.request(0x0000), bytes(4))
+        self.assertEqual(self.client.finish(token), b'data')
+        worker.join(2)
 
     def test_fragmented_reply_preserves_coalesced_indications(self):
         indication = struct.pack('<BBHHH', 2, 0, 0x0009, 8, 0)
