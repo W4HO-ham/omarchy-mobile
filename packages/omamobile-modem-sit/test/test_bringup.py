@@ -99,6 +99,27 @@ class BringupTests(unittest.TestCase):
 
     def test_attach_apn_defaults_to_empty(self):
         self.assertEqual(paths.config('/nonexistent')['network']['attach_apn'], '')
+    def withdraw_case(self, *, registered, cleared):
+        service = Mock()
+        registration = Mock()
+        registration.exists.return_value = registered
+        with patch.object(bringup, 'wait_for'), patch.object(bringup, 'radio'), \
+             patch.object(bringup, 'radio_state', return_value=0), \
+             patch.object(bringup, 'initial_attach'), patch.object(bringup, 'provision_profiles'), \
+             patch.object(bringup, 'nr_mode'), patch.object(bringup, 'data_snapshot'), \
+             patch.object(bringup, 'REGISTRATION', registration), \
+             patch.object(bringup, 'clear_stale', return_value=cleared), \
+             patch.object(bringup, 'withdraw_stale') as withdraw, \
+             patch.object(bringup, 'activate', side_effect=TimeoutError):
+            with self.assertRaises(TimeoutError):
+                bringup.start(service, SETTINGS)
+        return withdraw
+
+    def test_a_stale_ims_registration_is_withdrawn_before_the_bearers(self):
+        self.withdraw_case(registered=True, cleared=5).assert_called_once()
+        self.withdraw_case(registered=False, cleared=4).assert_not_called()
+        # The modem still lists a bearer: nothing cleared, nothing withdrawn.
+        self.withdraw_case(registered=True, cleared=0).assert_not_called()
 
     def test_no_apn_stops_before_the_radio(self):
         settings = paths.config('/nonexistent')

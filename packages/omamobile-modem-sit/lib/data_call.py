@@ -115,7 +115,7 @@ def clear_stale(client):
     ended when that sitd stopped. Clear the records only when the modem lists
     no bearer at all; otherwise leave them, and activate() refuses."""
     if call_ids(client.request(0x0602)):
-        return
+        return 0
     records = [p for cid in (1, 2, 3) for p in paths(cid)]
     # The IMS registration ended with its bearer.
     records.append(paths(2)[0].with_name('ims-registration.json'))
@@ -124,6 +124,7 @@ def clear_stale(client):
         path.unlink()
     if stale:
         print(f'cleared {len(stale)} bearer record(s) from an earlier start', flush=True)
+    return len(stale)
 
 
 def private_write(path, data):

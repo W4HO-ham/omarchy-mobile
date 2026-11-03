@@ -33,7 +33,7 @@ import time
 from at import radio, radio_state
 from data_call import APN_TYPES, activate, clear_stale, configured_profiles, initial_attach, provision_profiles
 from data_call import paths as bearer_paths
-from ims import register, start_stack
+from ims import REGISTRATION, register, start_stack, withdraw_stale
 from isim import bearer_dns, ipv6_pcscf, resolve_on_bearer, resolve_system
 from radio_settings import SAVED_NR, nr_mode
 from sit import ModemError
@@ -270,7 +270,9 @@ def start(service, settings, stopped=lambda: False):
     wait_for(service, registered, timeout, stopped)
     data_snapshot(client, 'at registration')
     service.stage('data')
-    clear_stale(client)
+    stale_ims = REGISTRATION.exists()
+    if clear_stale(client) and stale_ims:
+        withdraw_stale(client)
     activate(client, apn, ip_type=ip_type, on_event=service.event)
     service.pump()
     if not net.getboolean('ims', True):
