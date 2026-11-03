@@ -35,6 +35,11 @@ Owner configuration, before the first start (private files, mode 0600):
   Keep `ForceCAres=true` so DNS uses the MMS bearer. Set the MMS proxy to
   the carrier's `host:port`, or `NULL` when no proxy is required.
 
+Where the carrier's MMS APN is its internet APN, MMS goes over the internet
+bearer and there is no second bearer to prepare: sitd refuses one (on the
+palmtop it took the IMS bearer, and calls and SMS, down), and the bridge
+gives the internet bearer its address and DNS for mmsd-tng. Otherwise:
+
 Use the same session user as omatel-agent. Prepare the configured MMS
 bearer through MM's `Bearer.Connect` before starting `mmsd-tng.service`.
 Upstream discovers connected bearers; it does not connect one itself.

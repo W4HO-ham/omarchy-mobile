@@ -14,8 +14,13 @@ from mms_network import Network, configuration
 
 
 class MMS:
-    def __init__(self, client, settings):
+    def __init__(self, client, settings, internet_apn=''):
         self.client, self.settings = client, settings
+        # On a carrier whose MMS APN is the internet APN, MMS goes over the
+        # internet bearer. A second bearer on that APN took the IMS bearer
+        # down on the palmtop (2026-11-02), and with it calls and SMS.
+        apn = settings.get('apn', '').strip()
+        self.shared = bool(apn) and apn.lower() == internet_apn.strip().lower()
         self.state = 'unknown' if data.paths(3)[0].exists() else 'disconnected'
         self.error = ''
         self.token = None
@@ -35,6 +40,8 @@ class MMS:
             return self.status()
         if self.state != 'disconnected':
             raise RuntimeError('MMS operation pending or uncertain; no automatic retry')
+        if self.shared:
+            raise RuntimeError('MMS shares the internet APN: it goes over the internet bearer')
         apn = self.settings.get('apn', '').strip()
         data.check_apn(apn)
         ip_type = self.settings.get('ip_type', 'ipv4')
@@ -112,11 +119,14 @@ class MMS:
                     self.error = 'MMS setup refused (status ' + str(status) + ')'
                     return
                 if status or cid != 3 or active not in (1, 2):
-                    raise RuntimeError('MMS setup not confirmed')
+                    raise RuntimeError(f'MMS setup not confirmed (status {status}, CID {cid}, active {active})')
                 listed = self.client.request(0x0602)
                 if (3 not in data.call_ids(listed, active_only=True)
                         or data.call_ids(listed) != data.owned_ids()):
-                    raise RuntimeError('MMS active bearer list not confirmed')
+                    raise RuntimeError('MMS active bearer list not confirmed (listed CIDs %s, active %s, owned %s)'
+                                       % (sorted(data.call_ids(listed)),
+                                          sorted(data.call_ids(listed, active_only=True)),
+                                          sorted(data.owned_ids())))
                 data.private_write(data.paths(3)[1], result)
                 self.network = Network(configuration(result))
                 self.operation = 'network-up'
@@ -128,12 +138,13 @@ class MMS:
                 for path in data.paths(3):
                     path.unlink(missing_ok=True)
                 self.state, self.operation, self.config, self.error = 'disconnected', None, {}, ''
-        except (OSError, RuntimeError, ValueError, KeyError, subprocess.SubprocessError):
-            # Do not log modem records, addresses or carrier settings.
+        except (OSError, RuntimeError, ValueError, KeyError, subprocess.SubprocessError) as error:
+            # Do not log modem records, addresses or carrier settings: the
+            # messages raised above carry only status codes and bearer IDs.
             self.token = None
             self.state = 'unknown'
             self.error = 'MMS operation uncertain; reservation retained for attended recovery'
-            print(self.error, flush=True)
+            print(f'{self.error} ({type(error).__name__}: {error})', flush=True)
 
     def observe_calls(self, listed):
         if self.state != 'connected' and self.operation != 'network-up':

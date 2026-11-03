@@ -39,9 +39,12 @@ def sit_settings(path):
         return {}
     network = parser['network'] if parser.has_section('network') else {}
     mms = parser['mms'] if parser.has_section('mms') else {}
-    return dict(apn=network.get('apn', '').strip(),
-                ip_type=network.get('ip_type', 'ipv4v6').strip(),
-                mms_apn=mms.get('apn', '').strip(), mms_ip_type=mms.get('ip_type', 'ipv4').strip())
+    apn, mms_apn = network.get('apn', '').strip(), mms.get('apn', '').strip()
+    # MMS on the internet APN goes over the internet bearer: no second one.
+    shared = bool(mms_apn) and mms_apn.lower() == apn.lower()
+    return dict(apn=apn, ip_type=network.get('ip_type', 'ipv4v6').strip(),
+                mms_apn='' if shared else mms_apn, mms_ip_type=mms.get('ip_type', 'ipv4').strip(),
+                mms_shared=shared)
 
 
 def main(argv=None):

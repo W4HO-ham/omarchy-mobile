@@ -180,3 +180,30 @@ class MmsdProcess(BridgeTests):
         self.assertNotIn('Country Code is NULL', text)
         self.assertNotIn('Error setting own number', text)
         self.assertEqual(self.sitd.actions(), [])
+
+
+class SharedApn(BridgeTests):
+    """MMS on the internet APN: one bearer, with the address and DNS that
+    mmsd-tng resolves the MMSC through, and no second bearer to connect."""
+    status = staticmethod(lambda: registered_status(data=True))
+
+    def before_mmd(self):
+        config = Path(self.dir)/'mms.conf'
+        config.write_text('[network]\napn=Internet.Example\n[mms]\napn=internet.example\nip_type=ipv4\n')
+        self.mmd_args = ('--sit-config', str(config))
+        self.sitd.status['internet'] = dict(interface='rmnet0', address='192.0.2.7',
+                                            dns=['192.0.2.53', '192.0.2.54'])
+
+    def test_one_bearer_with_its_address_and_dns(self):
+        paths = self.client.call(MODEM0, mm.MODEM, 'ListBearers')[0]
+        self.assertEqual(len(paths), 1)
+        self.assertEqual(self.client.prop(MODEM0, mm.MODEM, 'MaxBearers'), 1)
+        self.assertTrue(self.client.prop(paths[0], mm.BEARER, 'Connected'))
+        self.assertEqual(self.client.prop(paths[0], mm.BEARER, 'Interface'), 'rmnet0')
+        self.assertEqual(self.client.prop(paths[0], mm.BEARER, 'Ip4Config'),
+                         dict(method=2, address='192.0.2.7', prefix=32, dns1='192.0.2.53', dns2='192.0.2.54'))
+        self.sitd.status['modem']['data'] = False
+        self.push()
+        wait_until(lambda: not self.client.prop(paths[0], mm.BEARER, 'Connected'), 5, 'bearer down')
+        self.assertEqual(self.client.prop(paths[0], mm.BEARER, 'Ip4Config'), {})
+        self.assertEqual(self.sitd.actions(), [])

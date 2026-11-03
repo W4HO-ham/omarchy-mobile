@@ -44,6 +44,7 @@ import paths
 from at import radio
 from calls import call_status, dial_payload, ring
 from data_call import paths as bearer_paths
+from data_network import configuration as internet_addresses
 from ims import REGISTRATION, record_registration
 from mms import MMS
 from inbox import persist_sms
@@ -89,6 +90,17 @@ APP_STATES = {0: 'unknown', 1: 'detected', 2: 'pin', 3: 'puk', 4: 'network-locke
 EMERGENCY = ('112', '911')
 EMERGENCY_NO_SIM = ('000', '08', '110', '118', '119', '999')
 SUBSCRIBERS = 8
+
+
+def internet_config():
+    """The internet bearer's address and the carrier's DNS, for the bridge's
+    copy of the bearer (MMS goes over it where the APNs are shared). Only in
+    the status sent to authorised clients, never in the world-readable one."""
+    try:
+        address, dns = internet_addresses(bearer_paths(1)[1].read_bytes())
+    except (OSError, ValueError):
+        return {}
+    return dict(interface='rmnet0', address=address, dns=dns)
 
 
 class UnconfirmedRelease(RuntimeError):
@@ -212,7 +224,7 @@ class Service:
         self.db = db
         self.settings = settings or paths.config()
         self.calls = {}
-        self.mms = MMS(client, self.settings['mms'])
+        self.mms = MMS(client, self.settings['mms'], self.settings['network'].get('apn', ''))
         self.audio = None
         self.muted = False
         self.pending = None
@@ -567,7 +579,7 @@ class Service:
             unread = self.db.execute('SELECT COUNT(*) FROM received WHERE consumed=0').fetchone()[0]
             return dict(modem=modem, calls=calls, sms=dict(unread=unread), updated=int(time.time()))
         received = [r[0] for r in self.db.execute('SELECT id FROM received WHERE consumed=0 ORDER BY rowid')]
-        return dict(mms=self.mms.status(), modem=modem, calls=calls, sms=dict(received=['sit:' + i for i in received]),
+        return dict(mms=self.mms.status(), internet=internet_config() if data else {}, modem=modem, calls=calls, sms=dict(received=['sit:' + i for i in received]),
                     audio=dict(available=True, running=self.audio is not None, mute=self.muted,
                                speaker=getattr(self.audio, 'tegu', False) is True,
                                speaker_available=False, error=''))

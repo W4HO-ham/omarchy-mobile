@@ -190,3 +190,29 @@ class Routing(unittest.TestCase):
     def test_ipv6_only_and_bad_addresses_refused(self):
         for data in (b'', record(1), record(3), response()[:4]+b'\2'+response()[5:]):
             with self.assertRaises(ValueError): mms_network.configuration(data)
+
+
+class SharedApn(unittest.TestCase):
+    def test_a_second_bearer_on_the_internet_apn_is_refused_before_the_modem(self):
+        client = Mock()
+        controller = mms.MMS(client, dict(apn='Wholesale.Example', ip_type='ipv4'), 'wholesale.example')
+        with self.assertRaisesRegex(RuntimeError, 'internet bearer'):
+            controller.connect()
+        client.request.assert_not_called()
+        client.begin.assert_not_called()
+        self.assertEqual(controller.state, 'disconnected')
+
+    def test_internet_address_and_dns_from_the_bearer_response(self):
+        import service
+        result = bytearray(record(1))
+        result[5:9] = bytes([192, 0, 2, 7])
+        result[0x1a:0x1e] = bytes([192, 0, 2, 53])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'data-call-response.bin'
+            path.write_bytes(bytes(result))
+            with patch.object(service, 'bearer_paths', return_value=(Path(directory)/'s', path)):
+                self.assertEqual(service.internet_config(),
+                                 dict(interface='rmnet0', address='192.0.2.7', dns=['192.0.2.53']))
+            path.unlink()
+            with patch.object(service, 'bearer_paths', return_value=(Path(directory)/'s', path)):
+                self.assertEqual(service.internet_config(), {})
