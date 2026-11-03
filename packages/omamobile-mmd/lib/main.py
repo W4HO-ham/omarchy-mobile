@@ -37,10 +37,11 @@ def sit_settings(path):
         parser.read(path)
     except (OSError, configparser.Error):
         return {}
-    if not parser.has_section('network'):
-        return {}
-    return dict(apn=parser['network'].get('apn', '').strip(),
-                ip_type=parser['network'].get('ip_type', 'ipv4v6').strip())
+    network = parser['network'] if parser.has_section('network') else {}
+    mms = parser['mms'] if parser.has_section('mms') else {}
+    return dict(apn=network.get('apn', '').strip(),
+                ip_type=network.get('ip_type', 'ipv4v6').strip(),
+                mms_apn=mms.get('apn', '').strip(), mms_ip_type=mms.get('ip_type', 'ipv4').strip())
 
 
 def main(argv=None):

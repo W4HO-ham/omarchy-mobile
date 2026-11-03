@@ -23,6 +23,7 @@ never logged.
 import hashlib
 import itertools
 import re
+import time
 import uuid
 
 from gi.repository import GLib
@@ -91,7 +92,7 @@ def derive(status):
                 mm.PACKET_DETACHED if radio == 'on' and sim == 'ready' else mm.PACKET_UNKNOWN),
         plmn=m.get('plmn', '') if registered else '',
         operator_name=m.get('operator_name', '') if registered else '',
-        home=reg == 'home',
+        home=reg == 'home', registered=registered,
         # sitd's LTE RSRP as 0-100 while registered; "recent" while it has one.
         signal=max(0, min(100, int(m.get('signal') or 0))) if registered else 0,
         emergency_numbers=list(m.get('emergency_numbers') or ('112', '911')),
@@ -117,6 +118,10 @@ class Bridge:
         self.derived = None
         self.sim = None
         self.bearer = None
+        self.mms_bearer = None
+        self.mms_deleted = False
+        self.mms_wait = None
+        self.mms_revision = 0
         self.calls = {}              # path -> call record
         self.sitd_calls = {}         # sitd call id -> path
         self.forgotten = set()       # sitd call ids whose MM call a client deleted
@@ -145,19 +150,24 @@ class Bridge:
     # ---- sitd status -> objects -------------------------------------------
 
     def on_status(self, status):
+        if status.get('mms') != (self.status or {}).get('mms'):
+            self.mms_revision += 1
         self.status = status
         d = derive(status)
         if self.modem is None:
             self.create_modem(d)
         else:
             self.update_modem(d)
+        self.sync_mms()
         self.sync_calls()
         self.sync_messages()
 
     def on_lost(self):
+        if self.mms_wait:
+            self.end_mms(MMError('Failed', 'omamobile-sitd went away; MMS outcome uncertain'))
         if self.modem is None:
             return
-        for path in list(self.calls) + list(self.messages) + [self.sim, self.bearer]:
+        for path in list(self.calls) + list(self.messages) + [self.sim, self.bearer, self.mms_bearer]:
             if path:
                 self.x.remove(path)
         self.x.remove(self.modem)
@@ -214,7 +224,8 @@ class Bridge:
                 Device=DEVICE, Physdev=DEVICE, Drivers=['cpif'], Plugin='omamobile',
                 PrimaryPort='umts_ipc0', Ports=[('umts_ipc0', mm.PORT_UNKNOWN), ('rmnet0', mm.PORT_NET)],
                 SupportedCapabilities=[mm.CAP_GSM_UMTS | mm.CAP_LTE],
-                CurrentCapabilities=mm.CAP_GSM_UMTS | mm.CAP_LTE, MaxBearers=1, MaxActiveBearers=1,
+                CurrentCapabilities=mm.CAP_GSM_UMTS | mm.CAP_LTE, MaxBearers=2 if self.settings.get('mms_apn') else 1,
+                MaxActiveBearers=2 if self.settings.get('mms_apn') else 1,
                 SupportedModes=[(mm.MODE_4G, mm.MODE_NONE)], CurrentModes=(mm.MODE_4G, mm.MODE_NONE),
                 SupportedBands=[mm.BAND_UNKNOWN], CurrentBands=[mm.BAND_UNKNOWN],
                 SupportedIpFamilies=mm.IP_V4 | mm.IP_V6 | mm.IP_V4V6)
@@ -231,7 +242,7 @@ class Bridge:
 
     def dynamic_props(self, name, d):
         if name == mm.MODEM:
-            return dict(Sim=self.sim or '/', Bearers=[self.bearer] if self.bearer else [],
+            return dict(Sim=self.sim or '/', Bearers=self.bearer_paths(),
                         State=d['state'], StateFailedReason=d['failed'], UnlockRequired=d['unlock'],
                         UnlockRetries=d['retries'], PowerState=d['power'],
                         AccessTechnologies=d['access'], SignalQuality=(d['signal'], d['signal'] > 0))
@@ -270,6 +281,111 @@ class Bridge:
             ProfileId=-1, Properties={'apn': GLib.Variant('s', apn),
                                       'ip-type': GLib.Variant('u', IP_TYPES.get(ip_type, mm.IP_V4V6))})},
             self.handle_bearer)
+
+    # ---- opt-in MMS bearer (CID 3) -----------------------------------------
+
+    def bearer_paths(self):
+        return [p for p in (self.bearer, self.mms_bearer) if p]
+
+    def check_mms_properties(self, props):
+        apn = self.settings.get('mms_apn', '')
+        if not apn:
+            raise unsupported('MMS without a locally configured APN')
+        candidate = props.get('apn')
+        if not isinstance(candidate, str) or candidate.lower() != apn.lower():
+            raise MMError('InvalidArgs', 'Only the locally configured MMS APN is supported')
+        # MM MMS is 1<<3; Android/SIT MMS is 1<<1. Never copy the MM mask
+        # into a SIT request. The configured profile is the only selector.
+        expected = IP_TYPES.get(self.settings.get('mms_ip_type', 'ipv4'), mm.IP_V4)
+        if (set(props) - {'apn', 'apn-type', 'ip-type'}
+                or props.get('apn-type', 8) != 8 or props.get('ip-type', expected) != expected):
+            raise MMError('InvalidArgs', 'Unsupported MMS bearer settings')
+
+    def sync_mms(self):
+        if not self.derived['sim_object']:
+            if self.mms_wait:
+                self.end_mms(MMError('WrongState', 'SIM is unavailable; MMS outcome uncertain'))
+            if self.mms_bearer:
+                self.x.remove(self.mms_bearer)
+                self.mms_bearer = None
+                self.x.set(self.modem, mm.MODEM, Bearers=self.bearer_paths())
+            return
+        if not self.settings.get('mms_apn') or self.mms_deleted:
+            return
+        if self.mms_bearer is None:
+            self.mms_bearer = self.path('Bearer')
+            props = {'apn': GLib.Variant('s', self.settings['mms_apn']),
+                     'apn-type': GLib.Variant('u', 8),
+                     'ip-type': GLib.Variant('u', IP_TYPES.get(
+                         self.settings.get('mms_ip_type', 'ipv4'), mm.IP_V4))}
+            self.x.add(self.mms_bearer, {mm.BEARER: dict(
+                Properties=props, BearerType=mm.BEARER_DEFAULT, ProfileId=-1, IpTimeout=60)},
+                self.handle_mms_bearer)
+        state = self.status.get('mms', {})
+        connected = (state.get('state') == 'connected' and self.derived['state'] >= mm.STATE_REGISTERED
+                     and state.get('interface') == 'rmnet2')
+        ipv4 = ({'method': GLib.Variant('u', 2),
+                 'address': GLib.Variant('s', state['address']),
+                 'prefix': GLib.Variant('u', 32),
+                 **{'dns' + str(i): GLib.Variant('s', value)
+                    for i, value in enumerate(state.get('dns', [])[:3], 1)}}
+                if connected and state.get('address') else {})
+        self.x.set(self.mms_bearer, mm.BEARER, Connected=connected,
+                   Interface='rmnet2' if connected else '', Ip4Config=ipv4, Ip6Config={})
+        self.x.set(self.modem, mm.MODEM, Bearers=self.bearer_paths())
+        self.check_mms_wait()
+
+    def end_mms(self, error=None):
+        pending, self.mms_wait = self.mms_wait, None
+        if pending is None:
+            return
+        if pending.get('timer'):
+            GLib.source_remove(pending['timer'])
+        if error:
+            pending['reply'].error(error)
+        else:
+            pending['reply'].ok()
+
+    def check_mms_wait(self):
+        pending = self.mms_wait
+        if pending is None or not pending['acked']:
+            return False
+        state = self.status.get('mms', {})
+        if state.get('state') == pending['target'] and (pending['target'] != 'connected'
+                or self.x.get(self.mms_bearer, mm.BEARER, 'Connected')):
+            self.end_mms()
+        elif state.get('state') in ('unknown', 'disconnected') and pending['target'] == 'connected':
+            self.end_mms(MMError('Failed', state.get('error') or 'MMS setup not confirmed'))
+        elif state.get('state') == 'unknown' or time.monotonic() >= pending['deadline']:
+            self.end_mms(MMError('Failed', 'MMS outcome uncertain; no automatic retry'))
+        return self.mms_wait is not None
+
+    def handle_mms_bearer(self, interface, method, args, reply):
+        if method not in ('Connect', 'Disconnect'):
+            raise unsupported(method)
+        if self.mms_wait:
+            raise MMError('InProgress', 'MMS operation already pending')
+        if self.derived['state'] < mm.STATE_REGISTERED:
+            raise MMError('WrongState', 'MMS needs network registration')
+        target = 'connected' if method == 'Connect' else 'disconnected'
+        pending = dict(reply=reply, target=target, acked=False, revision=self.mms_revision,
+                       deadline=time.monotonic() + 90, timer=None)
+        self.mms_wait = pending
+
+        def done(result, error):
+            if self.mms_wait is not pending:
+                return
+            if error:
+                return self.end_mms(sitd_error(error))
+            pending['acked'] = True
+            # Subscription events may overtake the worker's socket reply.
+            # A late 'connecting' reply must not erase an observed 'connected'.
+            if self.mms_revision == pending['revision']:
+                self.status['mms'] = result
+            self.sync_mms()
+            if self.mms_wait is pending:
+                pending['timer'] = GLib.timeout_add_seconds(1, self.check_mms_wait)
+        self.link.request('mms-connect' if method == 'Connect' else 'mms-disconnect', done)
 
     # ---- calls ----------------------------------------------------------------
 
@@ -431,9 +547,24 @@ class Bridge:
             if method == 'Enable':
                 return self.enable(args[0], reply)
             if method == 'ListBearers':
-                return reply.ok([self.bearer] if self.bearer else [])
-            if method in ('CreateBearer', 'DeleteBearer'):
-                raise unsupported(NOT_YET['data'])
+                return reply.ok(self.bearer_paths())
+            if method == 'CreateBearer':
+                self.check_mms_properties(args[0])
+                self.mms_deleted = False
+                self.sync_mms()
+                if self.mms_bearer is None:
+                    raise MMError('WrongState', 'Configured MMS bearer is unavailable')
+                return reply.ok(self.mms_bearer)
+            if method == 'DeleteBearer':
+                if args[0] != self.mms_bearer or not self.mms_bearer:
+                    raise unsupported('Deleting the internet bearer')
+                if self.mms_wait or self.status.get('mms', {}).get('state') != 'disconnected':
+                    raise MMError('WrongState', 'Disconnect the MMS bearer before deleting it')
+                self.x.remove(self.mms_bearer)
+                self.mms_bearer = None
+                self.mms_deleted = True
+                self.x.set(self.modem, mm.MODEM, Bearers=self.bearer_paths())
+                return reply.ok()
             raise unsupported(method)
         if interface == mm.MODEM_3GPP:
             raise unsupported(method)
