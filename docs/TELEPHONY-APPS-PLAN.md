@@ -365,6 +365,237 @@ owned MMS host resources, then confirmed CID 3 release if safe. An uncertain
 outcome remains owned for an attended reboot; never stop/reset the running
 CP in place. No startup unit or automatic retries until qualification.
 
+### 1.7b T3 implementation and attended runbook (2026-11-03)
+
+**Offline implementation, based on `tegu-mms-bearer` / `95bd8f3`.** This
+supersedes the “next sitd/bridge work” snapshot in §1.7a. No phone contacted,
+no modem or audio action run, and no phone kernel release measured in this
+session. Picture messages in **Messages remain blocked on the external
+omatel and omamessages changes below**; installing these packages is not
+an end-to-end MMS implementation.
+
+#### Package and source audit
+
+`packages/mmsd-tng` packages upstream **2.6.4**, tag commit
+[`f860df588bcf0e4c0ed06f5bca848bf5624ec292`](https://gitlab.com/kop316/mmsd/-/tree/2.6.4).
+The [AUR recipe](https://aur.archlinux.org/cgit/aur.git/tree/PKGBUILD?h=mmsd-tng-git)
+is `mmsd-tng-git` (metadata `2.5.0.r0.g6529119-1`, source follows HEAD).
+The exact-name Arch query and aarch64 Arch Linux ARM core/extra indexes
+contained no `mmsd-tng` package. Use the stable tag, the AUR dependencies,
+checked source/patch hashes, and one Meson build directory. Current ARM
+libphonenumber also requires explicit protobuf and Abseil linkage.
+
+The package adds a **disabled user unit**, with no modem dependency or bus
+activation. Five small source patches cover the empty OwnNumbers fallback,
+closing an HTTP socket if SO_BINDTODEVICE fails, choosing a dedicated MMS
+bearer even if internet uses the same APN, current build dependencies, and
+handling an international configured own number with a redacted IMSI. The
+last uses libphonenumber's unknown region `ZZ`; it does not guess a country
+for national numbers. With no IMSI-derived country, use E.164 recipients.
+The upstream phone-utils test covers the international/unknown-region case.
+
+#### SIT and ModemManager bridge
+
+| Layer | Implemented contract |
+| --- | --- |
+| sitd 0.3.18 | Authenticated `mms-connect` / `mms-disconnect`, selecting only `[mms] apn` and `ip_type`. No caller APN, CID, credentials or raw SIT. Empty APN disables setup. No automatic startup or retry |
+| IPC0 ownership | One transport/actor. SETUP/DEACT responses are tracked by token while the main loop handles call and SMS indications. A simultaneous ordinary request cannot discard the pending MMS reply |
+| Safety | Require active owned CID 1, successful saved internet response, existing PS permission, and exact bearer ownership. Confirm CID 3 active after setup and absent after release. No attach/profile/permission/PDU-allocation writes for MMS. No modem stop/reset. Unknown outcomes retain their RAM reservation and refuse another setup |
+| Host network | Validate CID 3's successful IPv4 or IPv4v6 response; configure rmnet2's /32 and a default only in table 625, selected by output-device rule priority 1625. Refuse foreign link/address/table/rule state. Reverse only owned operations. No main-table default, resolver change or NetworkManager changes |
+| Private state | Addresses/DNS only in the authorized socket status. `Connected` follows completed host configuration. CID-loss indications remove the host route and leave uncertain ownership for attended recovery |
+| mmd 0.1.3 | Existing internet object retained; configured MMS object has MM APN type **8**, mapped to SIT's MMS type **2** by profile selection. ListBearers/CreateBearer/DeleteBearer and MMS Bearer.Connect/Disconnect; arbitrary profiles refused, internet control unchanged, Simple.Connect/Disconnect still unsupported. IMS stays internal |
+| Exported MMS fields | Connected, Interface, Properties.apn/apn-type/ip-type; Ip4Config method=static, /32 address and carrier DNS. Ip6Config remains empty. The maximum two exported application bearers is a software limit, not hardware/carrier qualification |
+| WAP push | SMS DELIVER/RECEIVED, empty Text, complete binary Data with SMS UDH removed. Multipart fragments retain binary bytes when the port header is present only on the first part, including out-of-order receipt; raw indications and SQLite state remain private |
+
+Upstream's `plugins/modemmanager.c` uses modem discovery/ObjectManager,
+SIM properties, `Modem.ListBearers`, bearer Properties/Connected/Interface
+and Ip4Config/Ip6Config DNS, and Messaging.List/Messages/Added plus SMS
+PduType/State/Text/Data and Messaging.Delete. It **does not call
+CreateBearer or Bearer.Connect**. The owner or future agent must prepare
+the MMS bearer first. After setup on an already CONNECTED modem, call
+`org.ofono.mms.ModemManager.ProcessMessageQueue` to refresh upstream's
+context; a modem-state transition is not guaranteed. MMS proxy/MMSC settings
+belong to mmsd-tng's session API, not another ModemManager proxy interface.
+
+The configured dedicated MMS profile wins for a shared APN, including while
+it is disconnected. This first implementation intentionally isolates MMS;
+reusing the internet context is a later carrier-qualified alternative to
+§1.7a's initial suggestion, not something inferred from APN equality.
+
+#### External application work — stop here for UI implementation
+
+Audited the **packaged omatel 0.2.4** source, not just the older research
+copy. `apps/omatel-agent/src/sms.rs` still leaves binary SMS for the MMS
+service; its backend has SMS ingest/send, no mmsd-tng client. Packaged
+Messages 0.2.1 still disables the attach button and shows MMS settings
+placeholders in `src/app.rs`. These are separate public repositories,
+[omatel](https://github.com/derekross/omatel/tree/v0.2.4) and
+[omamessages](https://github.com/derekross/omamessages/tree/v0.2.1).
+Per the task's boundary, no Rust/UI implementation is made in this repo.
+
+The smallest follow-up in those repositories is:
+
+1. **omatel-agent:** typed session proxies for `org.ofono.mms.Manager`,
+   Service and Message; reconcile GetServices/GetMessages after startup and
+   bus-name changes, then follow message/property signals. The daemon alone
+   consumes/deletes WAP SMS; the agent must not also PushNotify them. Prepare
+   the configured MMS MM bearer before processing, and call ProcessMessageQueue
+   after connect. Add private carrier settings through ViewSettings/
+   ChangeSettings; keep proxy `host:port` (or `NULL`), MMSC and APN out of source.
+2. Persist MMS paths and state in the existing MMS schema. Validate attachment
+   PDU filename/offset/length, copy bounded parts into private app storage,
+   deduplicate by daemon message path, and coordinate read/delete. Reconcile
+   interrupted sends rather than resubmitting on a timeout.
+3. Add a Messages API for recipients, text and attachments. The agent calls
+   `Service.SendMessage(as, v, a(sss)) -> o`, where each attachment is content
+   ID/MIME type/absolute filename. Text is a text attachment. Messages enables
+   its chooser only with this backend, renders image/text parts and transfer
+   errors, and respects Service.GetProperties size/count limits. Do not
+   silently reduce group recipients to the first number.
+4. Private-bus/fake-MMSC tests for receive/send, duplicate notifications,
+   daemon/agent/app restarts, bounded attachment reads, uncertain sends and
+   one deleting WAP consumer; release/tag those repositories and update the
+   package pins here before claiming Messages picture-message support.
+
+#### Offline validation and remaining gaps
+
+The package was built for **aarch64 under QEMU/proot**, using a private
+Arch Linux ARM root under `/tmp`; no host or phone package installation.
+Upstream's four test programs pass, including MMS/WSP parsing and phone
+number handling. The sitd tests cover the runtime MMS state machine,
+ownership, refusal/timeout/loss, host route isolation/rollback, multipart
+WAP reassembly, and the real controller/transport against sit-sim with a
+concurrent call query. They also cover loss racing host configuration and
+status updates racing a bridge socket reply. Bridge tests use private D-Bus, fake sitd and real
+libmm-glib to check the second bearer, connect completion, errors and DNS.
+
+These do **not** qualify actual CID-to-rmnet2 mapping, two concurrent carrier
+application contexts, SO_BINDTODEVICE/oif-policy routing on the 9a, packet
+DNS/HTTP/proxy flow, MTU, IPv6-only MMS, suspend or Messages integration.
+A fake-MMSC test with separate simulated Wi-Fi and MMS interfaces is still
+needed; protocol tests alone do not establish a working picture transfer.
+
+Laptops only, risk **low**:
+
+```sh
+packages/mmsd-tng/test/all
+packages/omamobile-modem-sit/test/all
+packages/omamobile-mmd/test/all
+tests/packages
+tools/pr-check 95bd8f3
+```
+
+Expect: touched suites and PR gate pass; record any unrelated full-suite
+failure separately against the base. Stop on a changed-package failure.
+Rollback: discard this isolated worktree.
+
+Results: the three touched package suites pass. With `MMSD_TEST_BINARY`
+pointing to the built ARM daemon through an emulator wrapper, mmd also
+passes the real-daemon private-bus test: empty IMSI/OwnNumbers, configured
+E.164 own number and selection of rmnet2 when internet shares its APN.
+The host lacks ModemManager's introspection XML (one conformance test is
+skipped); real libmm-glib tests run. The aarch64 PKGBUILD produces an
+unsigned package and passes all four upstream test programs.
+
+Full `tests/packages`: **27 of 28 suites pass**. The unchanged
+`omamobile-omarchy` suite fails its real-source qmlformat checks for
+`Background.qml` and notifications `Service.qml`, then its re-patch check.
+An exact archive of `95bd8f3` reproduces both failures. No unrelated QML
+files are changed here. `tools/pr-check 95bd8f3` passes all identifier, blob,
+author-trailer and touched-script checks on the three implementation commits.
+
+#### Attended receive-first, send-second runbook (NOT RUN)
+
+**Do not run until reviewed and separately approved by the owner.** Install
+packages/configuration before the next approved fresh-boot modem session;
+do not restart sitd on a running 9a CP. Keep the established once-per-boot
+modem rule, sleep inhibitor, auto-sleep policy and log/watchdog arrangement.
+Do not test suspend with the modem running. No step here starts or stops
+the CP. Record the actual `uname -r`, date and package versions privately
+before testing. Never publish numbers, WAP bytes, MMS URLs, attachments or
+upstream daemon debug output.
+
+1. **Read-only preflight — low risk.** On the laptop, use the existing
+   off-repo backup path and run `OMAMOBILE_DEVICE=tegu tools/nv-backup --check
+   "$NV_BACKUP"`. On the phone, inspect `uname -r`, `pacman -Q
+   omamobile-modem-sit omamobile-mmd mmsd-tng`, `systemd-inhibit --list`,
+   `omamobile-sit status --json`, `ip -j address show dev rmnet2`,
+   `ip -j rule show`, and `ip -j route show table all`. Expect NV match,
+   UFS clean, SIM/PS/IMS as in the known working session, active internet,
+   no live call, rmnet2 down/address-free, unused table 625/priority 1625,
+   and a sleep inhibitor. Stop on a mismatch or uncertain existing bearer.
+   Rollback: none; read-only. If startup is needed, stop this runbook and
+   use the separately approved tegu modem runbook first.
+2. **Private configuration/software preparation — medium risk; before
+   that fresh-boot session.** Install the reviewed unsigned/signed local
+   package artifacts by the normal attended package procedure; do not
+   enable new units. Merge the `[mms]` section into the owner's sitd config:
+   `apn = <APN>`, `ip_type = ipv4`. As the session user, `install -dm700
+   ~/.mms/modemmanager`, then `install -m600 /usr/share/mmsd-tng/mms.example
+   ~/.mms/modemmanager/mms` only if the target does not already exist. Back
+   up an existing settings file privately instead of overwriting it. Fill
+   `<MMSC>`, `<APN>`, `<OWN_NUMBER>`; keep ForceCAres=true. Expect no unit
+   startup or CP action. Stop if credentials/PAP/CHAP or IPv6-only MMS are
+   required. Rollback: restore the private config copies before boot;
+   retain the previous package artifacts. Do not warm-restart sitd.
+3. **Prepare one MMS bearer — medium risk.** With already running sitd,
+   start only the bridge/agent using `omamobile-tegu-mmd-attach`'s existing
+   attended procedure. From `busctl --system tree
+   org.freedesktop.ModemManager1` and Modem.ListBearers, select the modem
+   and bearer whose Properties identify the configured MMS APN and APN
+   type 8. Set `$MMS_BEARER` to that object path; never assume a numeric
+   suffix. One explicit setup:
+
+   ```sh
+   sudo gdbus call --system --timeout 100 \
+     --dest org.freedesktop.ModemManager1 --object-path "$MMS_BEARER" \
+     --method org.freedesktop.ModemManager1.Bearer.Connect
+   ```
+
+   Expect Connected=true, Interface=rmnet2, private static IPv4/DNS,
+   the isolated oif rule/table and unchanged internet/IMS/Wi-Fi. Stop on
+   re-attachment, call/SMS regression, UFS/NV error, missing interface,
+   setup refusal or uncertain result. Do not repeat an unknown setup.
+   Rollback: only if connection is confirmed, stop the user MMS daemon
+   and call this same Bearer's Disconnect once; confirm CID 3 absent.
+   Unknown outcomes retain ownership and require attended recovery/reboot,
+   never an in-place modem stop/reset. A reboot is a separate approval.
+4. **Receive before send — medium risk.** As the same user as omatel,
+   `systemctl --user start mmsd-tng.service`. Do not use `-d`. Check its
+   session service and refresh the prepared bearer:
+
+   ```sh
+   gdbus call --session --dest org.ofono.mms --object-path /org/ofono/mms \
+     --method org.ofono.mms.Manager.GetServices
+   gdbus call --session --dest org.ofono.mms --object-path /org/ofono/mms \
+     --method org.ofono.mms.ModemManager.ProcessMessageQueue
+   ```
+
+   Have the owner send **one small picture** to this phone, with Wi-Fi up.
+   Expect one WAP notification, one stored/downloaded MMS via rmnet2 and
+   unchanged Wi-Fi/internet/IMS. Inspect GetMessages on the returned service
+   path privately. **Messages display is a gate pending the external app
+   work above**: after those releases, require one image/text bubble in the
+   right thread and no duplicate after app/agent restart. Until then this
+   proves only the transport/store, not Messages. Stop on a download or
+   routing failure, a second WAP consumer, or any privacy/safety regression.
+   Rollback: stop only `mmsd-tng.service`, then confirmed MMS Disconnect as
+   in step 3. Preserve its private queue; do not delete pending messages.
+5. **Send only after receive passed — medium risk.** With the external
+   app changes installed and reviewed, attach one small picture in Messages
+   to the consenting test recipient, send once and confirm actual receipt.
+   Expect one bubble, one daemon send record, correct attachment and one
+   recipient copy while Wi-Fi stays up. A local queued/sent state alone is
+   insufficient. Stop on ambiguity; reconcile daemon and recipient state
+   instead of pressing Send again. Rollback: stop the MMS daemon and
+   disconnect confirmed CID 3 only; retain uncertain message/queue state.
+   Group MMS, retries, IPv6 and suspend are separate qualifications.
+6. **Read-only postcheck — low risk.** Recheck NV/UFS, ordinary SMS both
+   ways, internet/IMS and the retained sleep inhibitor. Record pass/fail,
+   date, real kernel release and package versions in the tegu plan, with
+   causes/states only. Stop and preserve evidence if anything changed.
+   Rollback: attended recovery; no automatic CP stop or reboot.
+
 ### 1.8 Requirements against MODEM-PLAN
 
 | Requirement | MODEM-PLAN / other plan | State (2026-10-14) |
@@ -686,7 +917,7 @@ One developer, working days. The human approves every phone step, and each phone
 | **T0** RIL extensions | sitd: event subscription; signal, operator, SIM info; WAP push and status reports passed on; hold/swap/conference and call waiting (behind the allow-list); tests against `tools/sit-sim` extended for each | none (offline) | 6-9 d | `packages/omamobile-modem-sit/test/all` passes with the new cases; no numbers in logs |
 | **T1** `omamobile-mmd` | The bridge (§1.4 subset, §1.5): ObjectManager, Modem, 3gpp, Sim, Signal, Voice/Call, Messaging/Sms with `Data`, Bearer (read-only), polkit; the package with `conflicts=(modemmanager)` and no `provides=` (§1.5, as built); tests in the container with mmcli, GNOME Calls and Chatty against `sit-sim` | T0 | 10-14 d | In the container: Calls places, answers and hangs up a simulated call with DTMF; Chatty sends and receives a simulated SMS; no client errors on missing interfaces |
 | **T2** On the phone | MODEM-PLAN M4.2-M4.5 (needs a SIM), then the bridge, GNOME Calls and Chatty on the phone; M4.6 (the modem at boot) | a SIM; owner's go | 3-5 d | A real call both ways and SMS both ways from Calls and Chatty; M3.5 unchanged |
-| **T3** Data and MMS | Bearer export, NM `gsm` connection (Q5), IPv6 on rmnet0 if the carrier needs it, mmsd-tng with the carrier's MMSC; group MMS | T2 (M4.3) | 6-10 d | An MMS with an image received and sent over mobile data while Wi-Fi is up; a group MMS |
+| **T3** Data and MMS | MMS package/isolated bearer bridge built offline (§1.7b); external omatel/Messages work and attended receive/send pending. NM `gsm` (Q5), IPv6 and group MMS remain | T2 (M4.3) | 6-10 d | An MMS with an image received and sent over mobile data while Wi-Fi is up; a group MMS |
 | **T4** Call audio | Earpiece mode in the protection service, the Voice Call UCM verb, callaudiod, the WirePlumber rule; speakerphone; Bluetooth HFP (path 1, then 2; the PipeWire rebuild, Q10) | AoC C9; T2 | 14-25 d | Earpiece at a comfortable level with the bottom amplifier silent; speakerphone within the stage's ceilings; a call on a Bluetooth headset with answer and hang-up from its button |
 | **T5** Shell | Lock-screen call card and in-call controls, emergency button and dialpad (warning mode first), inline reply in notifications, status bar signal and states, the Mobile data tile and Mobile network sheet, `tel:`/`sms:` defaults | T1 (can start against the mock) | 8-12 d | Answering a call from the lock screen without unlocking; replying to an SMS from the notification; the status bar matches `mmcli` |
 | **T6** omadialer + shared crates + contacts | The workspace (§9.1), theme, contacts store and editor, dialpad, call log, favourites, in-call screen (mute, route, keypad), proximity, missed-call notifications, `org.omamobile.Phone1` | T1; T4 for routing | 21-28 d | The owner uses it instead of Calls for a week; incoming-call UI within 1 s of the ring [I: measure] |

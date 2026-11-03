@@ -1,0 +1,40 @@
+From: W4HO <87742609+W4HO-ham@users.noreply.github.com>
+Subject: [PATCH] MMS: prefer a dedicated MMS bearer for a shared APN
+
+--- a/plugins/modemmanager.c
++++ b/plugins/modemmanager.c
+@@ -1412,6 +1412,7 @@
+   const gchar             *apn;
+   gboolean                 interface_disconnected;
+   gboolean                 bearer_connected;
++  gboolean                 dedicated_mms = FALSE;
+ 
+   DBG ("Setting Context...");
+   if (modem->context_active)
+@@ -1435,11 +1436,25 @@
+       const gchar **dns_ipv4;
+       gchar *dns_ipv4_csv = NULL;
+ 
++      /* When internet and MMS share an APN, the dedicated bearer must
++       * win even while disconnected. Never fall back to the internet link. */
++      for (l = bearer_list; l != NULL; l = l->next)
++        {
++          MMBearerProperties *properties = mm_bearer_peek_properties (l->data);
++          const gchar *candidate = mm_bearer_properties_get_apn (properties);
++          if (candidate && modem->mms_apn &&
++              g_ascii_strcasecmp (candidate, modem->mms_apn) == 0 &&
++              (mm_bearer_properties_get_apn_type (properties) & MM_BEARER_APN_TYPE_MMS))
++            dedicated_mms = TRUE;
++        }
++
+       for (l = bearer_list; l != NULL; l = l->next)
+         {
+           active_bearers = active_bearers + 1;
+           modem_bearer = (MMBearer *) l->data;
+-          modem_bearer_properties = mm_bearer_get_properties (modem_bearer);
++          modem_bearer_properties = mm_bearer_peek_properties (modem_bearer);
++          if (dedicated_mms && !(mm_bearer_properties_get_apn_type (modem_bearer_properties) & MM_BEARER_APN_TYPE_MMS))
++            continue;
+           apn = mm_bearer_properties_get_apn (modem_bearer_properties);
+           if (g_strcmp0 (modem->message_center, "http://mms.invalid") == 0)
+             {
