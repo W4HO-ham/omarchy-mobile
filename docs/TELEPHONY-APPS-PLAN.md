@@ -538,6 +538,13 @@ upstream daemon debug output.
    startup or CP action. Stop if credentials/PAP/CHAP or IPv6-only MMS are
    required. Rollback: restore the private config copies before boot;
    retain the previous package artifacts. Do not warm-restart sitd.
+   **Shared APN (the palmtop's carrier):** when `[mms] apn` equals
+   `[network] apn`, skip step 3. sitd 0.3.22 refuses a second bearer on that
+   APN (on 2026-11-02 one took the IMS bearer down, and calls and SMS with
+   it), the bridge exports only the internet bearer, and that bearer carries
+   `Interface=rmnet0` and its address and DNS in `Ip4Config`. Expect
+   `ListBearers` to return one bearer with `Connected=true` and a non-empty
+   `Ip4Config`, then go on to step 4.
 3. **Prepare one MMS bearer — medium risk.** With already running sitd,
    start only the bridge/agent using `omamobile-tegu-mmd-attach`'s existing
    attended procedure. From `busctl --system tree
