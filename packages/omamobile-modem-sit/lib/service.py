@@ -258,9 +258,10 @@ class Service:
                                     tegu_aec=audio.getboolean('tegu_aec', False))
             try:
                 self.audio.__enter__()
-            except AudioRefused:
+            except AudioRefused as error:
                 self.audio = None
-                print('Call audio refused; continuing the call without audio', flush=True)
+                cause = f' ({error.__cause__})' if error.__cause__ else ''
+                print(f'Call audio refused: {error}{cause}; continuing the call without audio', flush=True)
                 return
             except BaseException:
                 self.audio = None
