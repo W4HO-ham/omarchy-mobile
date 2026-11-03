@@ -109,6 +109,23 @@ def owned_ids():
     return result
 
 
+def clear_stale(client):
+    """At start-up, an ownership record the modem doesn't list is left from an
+    earlier sitd in this boot: its bearers, and the IMS registration on them,
+    ended when that sitd stopped. Clear the records only when the modem lists
+    no bearer at all; otherwise leave them, and activate() refuses."""
+    if call_ids(client.request(0x0602)):
+        return
+    records = [p for cid in (1, 2, 3) for p in paths(cid)]
+    # The IMS registration ended with its bearer.
+    records.append(paths(2)[0].with_name('ims-registration.json'))
+    stale = [p for p in records if p.exists()]
+    for path in stale:
+        path.unlink()
+    if stale:
+        print(f'cleared {len(stale)} bearer record(s) from an earlier start', flush=True)
+
+
 def private_write(path, data):
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_CLOEXEC, 0o600)
     with os.fdopen(fd, 'wb') as out:

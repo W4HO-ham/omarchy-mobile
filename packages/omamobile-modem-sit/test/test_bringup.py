@@ -52,7 +52,7 @@ class BringupTests(unittest.TestCase):
         with patch.object(bringup, 'wait_for'), patch.object(bringup, 'radio'), \
              patch.object(bringup, 'radio_state', return_value=0), \
              patch.object(bringup, 'initial_attach'), patch.object(bringup, 'provision_profiles'), \
-             patch.object(bringup, 'nr_mode'), patch.object(bringup, 'activate', side_effect=TimeoutError), \
+             patch.object(bringup, 'nr_mode'), patch.object(bringup, 'clear_stale', return_value=0), patch.object(bringup, 'activate', side_effect=TimeoutError), \
              patch.object(bringup, 'data_snapshot'), \
              patch.object(bringup, 'start_stack') as stack, patch.object(bringup, 'register') as register:
             with self.assertRaises(TimeoutError):
@@ -71,7 +71,7 @@ class BringupTests(unittest.TestCase):
              patch.object(bringup, 'initial_attach') as attach, \
              patch.object(bringup, 'provision_profiles') as profile, \
              patch.object(bringup, 'nr_mode'), patch.object(bringup, 'data_snapshot'), \
-             patch.object(bringup, 'activate', side_effect=TimeoutError) as activate:
+             patch.object(bringup, 'clear_stale', return_value=0), patch.object(bringup, 'activate', side_effect=TimeoutError) as activate:
             with self.assertRaises(TimeoutError):
                 bringup.start(service, settings)
         return attach, profile, activate
@@ -152,7 +152,7 @@ class OrderTests(unittest.TestCase):
                    patch.object(bringup, 'provision_profiles', side_effect=note('profiles')),
                    patch.object(bringup, 'nr_mode', side_effect=note('nr')),
                    patch.object(bringup, 'data_snapshot'),
-                   patch.object(bringup, 'activate', side_effect=TimeoutError('stop here'))]
+                   patch.object(bringup, 'clear_stale', return_value=0), patch.object(bringup, 'activate', side_effect=TimeoutError('stop here'))]
         printer = patch('builtins.print')
         if times:
             patches.append(patch.object(bringup.time, 'monotonic', side_effect=times))
@@ -292,7 +292,7 @@ class IsimFallbackWiringTests(unittest.TestCase):
              patch.object(bringup, 'radio_state', return_value=0), \
              patch.object(bringup, 'initial_attach'), patch.object(bringup, 'provision_profiles'), \
              patch.object(bringup, 'nr_mode'), patch.object(bringup, 'data_snapshot'), \
-             patch.object(bringup, 'activate'), patch.object(bringup, 'start_stack'), \
+             patch.object(bringup, 'clear_stale', return_value=0), patch.object(bringup, 'activate'), patch.object(bringup, 'start_stack'), \
              patch.object(bringup, 'ipv6_pcscf', return_value=['x']) as read, \
              patch.object(bringup, 'register', side_effect=RuntimeError('stop')) as register, \
              patch('builtins.print'):

@@ -31,7 +31,7 @@ running with data only, unless [network] ims_required = yes.
 import time
 
 from at import radio, radio_state
-from data_call import APN_TYPES, activate, configured_profiles, initial_attach, provision_profiles
+from data_call import APN_TYPES, activate, clear_stale, configured_profiles, initial_attach, provision_profiles
 from data_call import paths as bearer_paths
 from ims import register, start_stack
 from isim import bearer_dns, ipv6_pcscf, resolve_on_bearer, resolve_system
@@ -270,6 +270,7 @@ def start(service, settings, stopped=lambda: False):
     wait_for(service, registered, timeout, stopped)
     data_snapshot(client, 'at registration')
     service.stage('data')
+    clear_stale(client)
     activate(client, apn, ip_type=ip_type, on_event=service.event)
     service.pump()
     if not net.getboolean('ims', True):

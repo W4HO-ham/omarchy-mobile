@@ -21,15 +21,16 @@ def nr_mode(client, restore=False):
         if len(target) != 1:
             raise RuntimeError('invalid saved NR mode')
     else:
+        target = b'\0'
         if SAVED_NR.exists():
-            # An earlier start-up on this CP (sitd started again in the same
-            # boot) already set mode 0 and kept the original: nothing to do.
-            if current == b'\0':
-                print('verified NR mode 0 (set by an earlier start-up this boot)', flush=True)
+            # A second start in the same boot (sitd restarted) finds the
+            # change already made: keep the saved original and go on. Any
+            # other value after a change is an unknown state: refuse.
+            if current == target and len(SAVED_NR.read_bytes()) == 1:
+                print('NR mode already 0 this boot', flush=True)
                 return
             raise RuntimeError('NR experiment already active')
         private_write(SAVED_NR, current)
-        target = b'\0'
     client.request(0x0748, target, timeout=30)
     if client.request(0x0749) != target:
         raise RuntimeError('NR mode did not reach requested value')
