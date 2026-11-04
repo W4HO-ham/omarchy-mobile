@@ -150,7 +150,7 @@ blacklists both and starts neither.
 
 Licence: MIT.
 
-## The modem at boot (opt-in)
+## The modem at boot
 
 `omamobile-tegu-modem-up` starts the CP once per boot: the kernel's own
 drivers when it carries them (`cpif`, `pcie_gs201_cp` and the device tree's
@@ -189,25 +189,26 @@ bring-up runners.
 ### Starting it at boot
 
 `omamobile-tegu-modem-boot.service` runs `omamobile-tegu-modem-up --phone
---gnss` at boot. The package installs it disabled. Before enabling it:
+--gnss` at boot. The package enables it with a vendor wants link, as
+`omamobile-device-cheetah` does for the 7 Pro's modem. It is skipped on a
+phone that `tools/phone-provision` hasn't provisioned (no modem chroot, NV
+checksums or props), and on a kernel without the CP drivers or a device tree
+without FAR_ALIVE the start ends with exit 3, which the unit counts as
+success: nothing loaded, no latch, no sleep inhibitor. With the CP up the
+battery drains as if awake, since the palmtop no longer suspends.
 
-- **Slot B marked successful.** Otherwise every reset spends one of ABL's
-  three tries, and at zero it boots stock on slot A, which has overwritten
-  `userdata`.
-- **A kernel with linux-omarchy-mobile#172** (the PERIC0 GPIO bus clock
-  kept on). Without it the modem's GPIO writes hang the palmtop within
-  minutes.
-- **The charger in** for the first boots.
+It needs a kernel with linux-omarchy-mobile#172 (the PERIC0 GPIO bus clock
+kept on): without it the modem's GPIO writes hang the palmtop within
+minutes. With slot B not marked successful, every reset spends one of ABL's
+three tries, and at zero it boots stock on slot A, which has overwritten
+`userdata`.
 
-Then `systemctl enable omamobile-tegu-modem-boot`. With it on the battery
-drains as if awake, since the palmtop no longer suspends.
-
-**Rollback:** `systemctl disable omamobile-tegu-modem-boot`, then reboot.
-If the palmtop resets before you can log in, the latch does the work: the
-boot after a reset with the modem up finds it and doesn't start the modem,
-so log in then, disable the unit and remove the latch. If it still doesn't
-come up, hold Volume Down + Power for fastboot and boot a known-good image
-set.
+**Off:** `systemctl mask omamobile-tegu-modem-boot` (a vendor link survives
+`disable`; `unmask` turns it back on), then reboot. If the palmtop resets
+before you can log in, the latch does the work: the boot after a reset with
+the modem up finds it and doesn't start the modem, so log in then, mask the
+unit and remove the latch. If it still doesn't come up, hold Volume Down +
+Power for fastboot and boot a known-good image set.
 
 ## Optional Phone and Messages attachment
 

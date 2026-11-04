@@ -110,7 +110,9 @@ if [[ -e $LATCH ]]; then
   say "an earlier start never reached ONLINE, or its boot didn't shut down cleanly ($LATCH, $(cat "$LATCH" 2>/dev/null)): look at /var/log/omamobile/modem.log and the last boot's journal, then remove it to try again"
   exit 1
 fi
-[[ -e $SYS/bus/platform/devices/154e0000.pinctrl ]] || { say "no FAR_ALIVE pinctrl (old device tree)"; exit 1; }
+# 3: nothing to start on this kernel or device tree (the boot unit counts it
+# as success); nothing has been loaded or written yet.
+[[ -e $SYS/bus/platform/devices/154e0000.pinctrl ]] || { say "no FAR_ALIVE pinctrl (old device tree): the modem stays off"; exit 3; }
 
 # Which drivers: the kernel's own, or the bring-up modules
 if [[ -e $DT/cpif ]] && modinfo -n cpif >/dev/null 2>&1 && modinfo -n pcie_gs201_cp >/dev/null 2>&1; then
@@ -118,7 +120,7 @@ if [[ -e $DT/cpif ]] && modinfo -n cpif >/dev/null 2>&1 && modinfo -n pcie_gs201
 else
   in_tree=0
   for f in tegu-modem-cpif-activate.ko tegu-pcie0-cp.ko shm_ipc.ko cpif.ko cpif-keep-link.ko gnss_spi.ko gnssif.ko; do
-    [[ -f $B/$f ]] || { say "no in-kernel CP drivers and no $B/$f"; exit 1; }
+    [[ -f $B/$f ]] || { say "no in-kernel CP drivers and no $B/$f: the modem stays off"; exit 3; }
   done
 fi
 

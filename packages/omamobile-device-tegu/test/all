@@ -104,10 +104,17 @@ for unit in omamobile-tegu-graphics omamobile-tegu-usb-rescue; do
   [[ $(readlink "$tmp/root/usr/lib/systemd/system/multi-user.target.wants/$unit.service") == ../$unit.service ]] \
     || fail "$unit is enabled by a vendor wants link"
 done
-# The modem's boot start is opt-in: installed, never enabled by the package
+# The modem's boot start is on by default (a vendor wants link), skipped on
+# an unprovisioned phone, and a kernel without the CP drivers isn't a failure
 [[ -f $tmp/root/usr/lib/systemd/system/omamobile-tegu-modem-boot.service ]] || fail "install stages the modem's boot start"
-[[ -e $tmp/root/usr/lib/systemd/system/multi-user.target.wants/omamobile-tegu-modem-boot.service ]] \
-  && fail "the modem's boot start is enabled by the package (it must be opt-in)"
+[[ $(readlink "$tmp/root/usr/lib/systemd/system/multi-user.target.wants/omamobile-tegu-modem-boot.service") == ../omamobile-tegu-modem-boot.service ]] \
+  || fail "the modem's boot start is enabled by a vendor wants link"
+for p in /usr/lib/omamobile-vendor/modem/root /etc/omamobile/modem-nv.sha256 /var/lib/omamobile-vendor/modem/props.conf; do
+  grep -qx "ConditionPathExists=$p" vendor/systemd/system/omamobile-tegu-modem-boot.service \
+    || fail "the boot start is skipped without $p (an unprovisioned phone)"
+done
+grep -qx 'SuccessExitStatus=3' vendor/systemd/system/omamobile-tegu-modem-boot.service \
+  || fail "a kernel without the CP drivers (exit 3) is not a failed unit"
 grep -q 'omamobile-tegu-modem-boot' omamobile-device-tegu.install && fail "the install scriptlet must not enable the modem's boot start"
 grep -qx 'ExecStart=/usr/bin/omamobile-tegu-modem-up --phone --gnss' vendor/systemd/system/omamobile-tegu-modem-boot.service \
   || fail "the boot start brings gnssd up with the modem, for the Location switch"

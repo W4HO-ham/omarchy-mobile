@@ -1,29 +1,38 @@
 # SPDX-License-Identifier: MIT
-# The Pixel 9a's modem at boot, opt-in: not enabled by the package. The owner
-# turns it on with `systemctl enable omamobile-tegu-modem-boot`. It starts the
-# CP once (omamobile-tegu-modem-up keeps the once-per-boot rule, the NV
-# checks, the failure latch and the sleep inhibitor), then the phone service
-# and, when installed, the Phone and Messages bridge, with gnssd in the
-# modem profile so Omarchy's Location switch gets fixes (omamobile-gnss). With it on the palmtop
-# doesn't suspend (the modem blocks sleep until suspend with the CP up is
+# The Pixel 9a's modem at boot, on by default: the package enables it with a
+# vendor wants link, as omamobile-device-cheetah does for the 7 Pro's
+# omamobile-modem-boot.target. It starts the CP once (omamobile-tegu-modem-up
+# keeps the once-per-boot rule, the NV checks, the failure latch and the
+# sleep inhibitor), then the phone service and, when installed, the Phone and
+# Messages bridge, with gnssd in the modem profile so Omarchy's Location
+# switch gets fixes (omamobile-gnss). With the CP up the palmtop doesn't
+# suspend (the modem blocks sleep until suspend with the CP up is
 # qualified), so the battery drains as if awake.
 #
-# Before enabling it (README, "Starting it at boot"): slot B marked
-# successful, a kernel with linux-omarchy-mobile#172, and the charger in for
-# the first boots. Rollback: systemctl disable omamobile-tegu-modem-boot and
-# reboot; after a reset with the modem up, the latch keeps the next boot
+# A phone that isn't provisioned (tools/phone-provision hasn't run) skips
+# the unit: the conditions below. A kernel without the CP drivers, or a
+# device tree without FAR_ALIVE, ends the start with exit 3, which counts as
+# success here: nothing loaded, no latch, no inhibitor.
+#
+# Off: systemctl mask omamobile-tegu-modem-boot (a vendor link survives
+# disable). After a reset with the modem up, the latch keeps the next boot
 # from starting it.
 [Unit]
-Description=Start the Pixel 9a's modem and phone service (opt-in)
+Description=Start the Pixel 9a's modem and phone service
 Documentation=file:///usr/share/doc/omamobile-device-tegu/README.md
 After=omamobile-tegu-aoc.service omamobile-tegu-graphics.service network.target
 Wants=network.target
 ConditionPathExists=/usr/lib/omamobile-vendor/omamobile-vendor-chroot
+ConditionPathExists=/usr/lib/omamobile-vendor/modem/root
+ConditionPathExists=/etc/omamobile/modem-nv.sha256
+ConditionPathExists=/var/lib/omamobile-vendor/modem/props.conf
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/bin/omamobile-tegu-modem-up --phone --gnss
+# 3: no CP drivers in this kernel, or an old device tree; the modem stays off
+SuccessExitStatus=3
 TimeoutStartSec=300
 
 [Install]

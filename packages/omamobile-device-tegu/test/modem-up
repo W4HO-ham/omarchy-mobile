@@ -145,3 +145,23 @@ rm -rf "$t/s4"; mkdir -p "$t/s4"
 env -i PATH="$F:/usr/bin:/bin" OMAMOBILE_MODEM_TEST=1 OMAMOBILE_MODEM_LATCH="$t/s4/latch" \
   bash bin/omamobile-tegu-modem-up --stopped > "$t/s4/out" 2>&1 || fail "--stopped with no latch succeeds"
 printf 'ok - %s\n' "modem-up: --stopped removes this boot's ONLINE latch whatever the result, and keeps the others"
+
+# Nothing to start (exit 3, which the default-on boot unit counts as success):
+# no FAR_ALIVE pinctrl (an old device tree), or neither the kernel's CP
+# drivers nor the bring-up modules. Nothing loads, no latch, no inhibitor.
+nostart() { # NAME PINCTRL(0/1)
+  local r=$t/$1; rm -rf "$r"; mkdir -p "$r/sys/bus/platform/devices" "$r/dt" "$r/mods" "$r/log"; : > "$r/calls"
+  (( $2 )) && mkdir -p "$r/sys/bus/platform/devices/154e0000.pinctrl"
+  local rc=0
+  env -i PATH="$F:/usr/bin:/bin" T="$r" OMAMOBILE_MODEM_TEST=1 OMAMOBILE_SYS="$r/sys" OMAMOBILE_DT="$r/dt" \
+    OMAMOBILE_MODEM_MODULES="$r/mods" OMAMOBILE_MODEM_LATCH="$r/latch" OMAMOBILE_MODEM_CP="$t/cp" \
+    OMAMOBILE_VENDOR_CHROOT="$t/chroot" OMAMOBILE_MODEM_LOG="$r/log" \
+    bash bin/omamobile-tegu-modem-up --phone > "$r/out" 2>&1 || rc=$?
+  [[ $rc == 3 ]] || { cat "$r/out"; fail "$1: exit $rc, not 3"; }
+  [[ -e $r/latch ]] && fail "$1: no latch when nothing starts"
+  grep -qE '^(modprobe|insmod|systemd-run)' "$r/calls" && fail "$1: nothing loads or starts"
+  grep -q 'the modem stays off' "$r/out" || fail "$1: says the modem stays off"
+}
+nostart old-dt 0
+nostart no-drivers 1
+printf 'ok - %s\n' "modem-up: an old device tree or a kernel without the CP drivers ends with exit 3, nothing loaded"
