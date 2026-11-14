@@ -33,22 +33,22 @@
  * devinfo itself by PARTNAME, checks the storage guard and the phone, and
  * opens and closes the read-write window itself:
  *
- *   The kernel lets a partition be written only if its whole disk is
- *   writable too: bdev_read_only() is the partition's own BD_READ_ONLY flag
- *   OR the disk's (part0's) flag (include/linux/blkdev.h), and both
- *   blkdev_write_iter() and the BLKROGET ioctl and sysfs "ro" use it. So
- *   devinfo can't be written while its disk (the boot LUN, sdd) is read-only,
- *   and no ioctl makes the partition alone writable. Clearing the disk flag
- *   makes the whole-disk node writable, and through it every byte of the LUN,
- *   the other partitions (pinfo, blenv, mfg_data on husky) included, for as
- *   long as the window lasts: their own flags guard only their own nodes.
- *   The tool keeps that window to the one byte: disk rw (checked), the
- *   siblings' own flags checked (the only moment they can be read), devinfo
- *   rw, one byte written and read back, devinfo ro, disk ro, both checked.
+ *   The kernel counts a partition read-only when its own BD_READ_ONLY flag
+ *   or its disk's (part0's) flag is set: bdev_read_only() in
+ *   include/linux/blkdev.h, which blkdev_write_iter(), the BLKROGET ioctl
+ *   and sysfs "ro" all use. Since #252 the initramfs guards the boot LUNs
+ *   as it guards the main one: the whole-disk node is removed, the disk's
+ *   own flag is left clear and every partition has its own flag set. So the
+ *   window is devinfo's own flag alone: checked set, cleared, one byte
+ *   written and read back, set again and checked. No disk flag is touched
+ *   and no whole-disk node exists, so nothing else on the LUN (pinfo, blenv,
+ *   mfg_data on husky) is writable for a moment. Under an initramfs from
+ *   before #252, which sets the boot LUN's disk flag, the tool refuses:
+ *   there devinfo could only be opened together with the whole LUN.
  *   The job-control and termination signals are blocked, and a relock child
- *   sets both flags back the moment this process dies, and every 10 s from
- *   the moment the window opens for as long as it stays open (a stopped or
- *   hung process), until this process has closed the window itself.
+ *   sets devinfo's flag back the moment this process dies, and every 10 s
+ *   from the moment the window opens for as long as it stays open (a stopped
+ *   or hung process), until this process has closed the window itself.
  *
  * The source sits in bootctl/, not src/: bin/omamobile's initramfs builder
  * compiles a device package's src/omamobile-bootctl.c into the boot image,
@@ -230,13 +230,15 @@ static int own_flag(const char *path)
 	return b[0] == '1';
 }
 
+/* A disk's own flag (in the test build a file beside where its node would be). */
+static int disk_flag(const struct node *disk)
+{
+	return own_flag(disk->path);
+}
+
 /* The kernel's bdev_read_only(): own flag OR the disk's flag. */
 static int ro_get(const struct node *n, const struct node *disk)
 {
-	/* fault: a sibling whose node can't be opened once the window is open */
-	if (has_fault("sdd3-unreadable-in-window") && disk && !strcmp(n->name, "sdd3") &&
-	    own_flag(disk->path) == 0)
-		return -1;
 	int o = own_flag(n->path);
 	if (o < 0)
 		return -1;
@@ -248,11 +250,8 @@ static int ro_get(const struct node *n, const struct node *disk)
 static int ro_set(const struct node *n, int v)
 {
 	char f[PATH_MAX + 4];
-	size_t pl = strlen(n->path);
-	int is_disk = pl && !isdigit((unsigned char)n->path[pl - 1]);
-	/* faults: a flag that silently doesn't change, as a stuck or lying device would */
-	if ((v == 1 && !is_disk && has_fault("part-relock-ignored")) ||
-	    (v == 0 && is_disk && has_fault("disk-stays-ro")))
+	/* fault: a flag that silently doesn't change, as a stuck or lying device would */
+	if (v == 1 && has_fault("part-relock-ignored"))
 		return 0;
 	xfmt(f, sizeof(f), "%s/ro.log", root);
 	FILE *log = fopen(f, "a");
@@ -268,6 +267,20 @@ static int ro_set(const struct node *n, int v)
 	return fclose(fp) ? -1 : 0;
 }
 #else
+/*
+ * A disk's own flag. The guard removes every whole-disk node, so there is no
+ * node to ask with BLKROGET; sysfs "ro" on a disk is that flag.
+ */
+static int disk_flag(const struct node *disk)
+{
+	char f[PATH_MAX + 8], b[8];
+	xfmt(f, sizeof(f), "%s/ro", disk->sys);
+	if (slurp(f, b, sizeof(b)) < 1 || (b[0] != '0' && b[0] != '1'))
+		return -1;
+	return b[0] == '1';
+}
+
+/* A partition, through its own node: its own flag OR its disk's. */
 static int ro_get(const struct node *n, const struct node *disk)
 {
 	(void)disk;
@@ -308,13 +321,16 @@ static int partname(const char *sys, char *out, size_t n)
 	return 0;
 }
 
-static int fill_node(struct node *nd, const char *name, const char *sys)
+/* need_node: a partition's node must be the device sysfs names; a disk has none. */
+static int fill_node(struct node *nd, const char *name, const char *sys, int need_node)
 {
 	xfmt(nd->name, sizeof(nd->name), "%s", name);
 	xfmt(nd->sys, sizeof(nd->sys), "%s", sys);
 	rp(nd->path, sizeof(nd->path), "/dev/%s", name);
 	nd->rdev = 0;
-#ifndef BOOTCTL_TEST
+#ifdef BOOTCTL_TEST
+	(void)need_node;
+#else
 	char f[PATH_MAX + 8], buf[32];
 	unsigned ma, mi;
 	struct stat st;
@@ -324,6 +340,8 @@ static int fill_node(struct node *nd, const char *name, const char *sys)
 		return -1;
 	}
 	nd->rdev = makedev(ma, mi);
+	if (!need_node)
+		return 0;
 	if (stat(nd->path, &st) || !S_ISBLK(st.st_mode) || st.st_rdev != nd->rdev) {
 		err("%s is not the block device sysfs names (%u:%u)", nd->path, ma, mi);
 		return -1;
@@ -369,8 +387,8 @@ static int find_devinfo(struct target *t)
 			if (!strcmp(pn, "devinfo")) {
 				if (found++ == 0) {
 					xfmt(devinfo_disk, sizeof(devinfo_disk), "%s", e->d_name);
-					if (fill_node(&t->part, p->d_name, psys) ||
-					    fill_node(&t->disk, e->d_name, dsys)) {
+					if (fill_node(&t->part, p->d_name, psys, 1) ||
+					    fill_node(&t->disk, e->d_name, dsys, 0)) {
 						closedir(dd);
 						closedir(d);
 						return -1;
@@ -396,7 +414,7 @@ static int find_devinfo(struct target *t)
 		err("devinfo is on the main LUN (%s); this tool knows only devinfo on a boot LUN", devinfo_disk);
 		return -1;
 	}
-	/* The disk's other partitions, whose own flags are checked in the window. */
+	/* The disk's other partitions: none may be held or open for writing either. */
 	xfmt(dsys, sizeof(dsys), "%s/%s", sysblock, t->disk.name);
 	DIR *dd = opendir(dsys);
 	if (!dd)
@@ -409,7 +427,7 @@ static int find_devinfo(struct target *t)
 		if (!is_part_dir(psys))
 			continue;
 		if (t->nsib == (int)(sizeof(t->sib) / sizeof(t->sib[0])) ||
-		    fill_node(&t->sib[t->nsib++], e->d_name, psys)) {
+		    fill_node(&t->sib[t->nsib++], e->d_name, psys, 1)) {
 			closedir(dd);
 			err("can't list the partitions of %s", t->disk.name);
 			return -1;
@@ -462,7 +480,12 @@ static int same_file(const struct stat *st, const struct node *n)
 {
 #ifdef BOOTCTL_TEST
 	struct stat ns;
-	return !stat(n->path, &ns) && ns.st_dev == st->st_dev && ns.st_ino == st->st_ino;
+	char alt[PATH_MAX];
+	if (!stat(n->path, &ns) && ns.st_dev == st->st_dev && ns.st_ino == st->st_ino)
+		return 1;
+	/* a node for the same device made outside /dev (the guard removes /dev's) */
+	rp(alt, sizeof(alt), "/elsewhere/%s", n->name);
+	return !stat(alt, &ns) && ns.st_dev == st->st_dev && ns.st_ino == st->st_ino;
 #else
 	return S_ISBLK(st->st_mode) && st->st_rdev == n->rdev;
 #endif
@@ -570,9 +593,11 @@ static int in_allowlist(const char *name)
 }
 
 /*
- * The storage guard as the initramfs leaves it: the main LUN's whole-disk
- * node gone (or mode 0000), every other disk and every partition outside the
- * allowlist read-only, devinfo and its disk among them.
+ * The storage guard as the initramfs leaves it since #252: every LUN's
+ * whole-disk node gone (the main LUN's may be back at mode 0000, the udev
+ * rule's second line), the boot LUN's own flag clear, and every partition
+ * outside the allowlist read-only, devinfo among them. With the disk's flag
+ * clear a partition's BLKROGET is its own flag.
  */
 static int check_guard(const struct target *t)
 {
@@ -580,12 +605,6 @@ static int check_guard(const struct target *t)
 	struct stat st;
 	int bad = 0;
 
-	rp(f, sizeof(f), "/dev/%s", t->main_disk);
-	if (!stat(f, &st) && (st.st_mode & 07777)) {
-		err("the main LUN's whole-disk node %s is usable (mode %o); the storage guard is not holding",
-		    f, st.st_mode & 07777);
-		bad = 1;
-	}
 	rp(f, sizeof(f), "/sys/block");
 	DIR *d = opendir(f);
 	if (!d)
@@ -599,9 +618,28 @@ static int check_guard(const struct target *t)
 		xfmt(disk.name, sizeof(disk.name), "%s", e->d_name);
 		rp(disk.path, sizeof(disk.path), "/dev/%s", e->d_name);
 		int main_disk = !strcmp(e->d_name, t->main_disk);
-		if (!main_disk && ro_get(&disk, NULL) != 1) {
-			err("%s is not read-only; the storage guard is not holding", e->d_name);
-			bad = 1;
+		if (!lstat(disk.path, &st)) {
+			if (!main_disk) {
+				err("the whole-disk node %s exists; the storage guard is not holding "
+				    "(an initramfs from before the boot-LUN guard, #252, leaves it)", disk.path);
+				bad = 1;
+			} else if (st.st_mode & 07777) {
+				err("the main LUN's whole-disk node %s is usable (mode %o); the storage guard is not holding",
+				    disk.path, st.st_mode & 07777);
+				bad = 1;
+			}
+		}
+		if (!strcmp(e->d_name, t->disk.name)) {
+			int df = disk_flag(&t->disk);
+			if (df == 1) {
+				err("%s is read-only at the disk level: this initramfs is from before the "
+				    "boot-LUN guard (#252), and under it devinfo can't be opened alone; refusing",
+				    e->d_name);
+				bad = 1;
+			} else if (df) {
+				err("can't read %s's own read-only flag; refusing", e->d_name);
+				bad = 1;
+			}
 		}
 		DIR *dd = opendir(dsys);
 		if (!dd)
@@ -716,22 +754,19 @@ static void print_slots(const uint8_t *d)
 
 /* ---- the read-write window ---------------------------------------------- */
 
+/* devinfo's own flag set again, and read back. No disk flag is ever touched. */
 static int relock(const struct target *t)
 {
-	int ok = 1;
-	/* devinfo first: while its disk is still writable its own flag reads back */
 	if (ro_set(&t->part, 1) || ro_get(&t->part, &t->disk) != 1)
-		ok = 0;
-	if (ro_set(&t->disk, 1) || ro_get(&t->disk, NULL) != 1)
-		ok = 0;
-	return ok ? 0 : -1;
+		return -1;
+	return 0;
 }
 
 /*
  * The relock child. It holds the read end of a pipe whose write end only the
  * parent has. Before the window opens it waits without a timeout (nothing is
- * writable yet). The parent writes 'O' just before it clears the first flag;
- * from then on the child sets devinfo and its disk read-only every
+ * writable yet). The parent writes 'O' just before it clears devinfo's flag;
+ * from then on the child sets devinfo read-only every
  * RELOCK_TIMEOUT_MS for as long as the pipe stays open (a stopped or hung
  * parent: its later steps then fail closed), and once more when the pipe
  * closes, whether the parent finished, crashed or was killed. It ignores the
@@ -867,15 +902,34 @@ static void test_change_under(const struct target *t)
 		close(fd);
 	}
 }
+
+/* The guard changes between the last check and the window (test only). */
+static void test_late_change(const struct target *t)
+{
+	char f[PATH_MAX + 4];
+	FILE *fp;
+	if (has_fault("late-disk-ro"))
+		xfmt(f, sizeof(f), "%s.ro", t->disk.path);
+	else if (has_fault("late-devinfo-open"))
+		xfmt(f, sizeof(f), "%s.ro", t->part.path);
+	else
+		return;
+	fp = fopen(f, "w");
+	if (fp) {
+		fprintf(fp, "%d\n", has_fault("late-disk-ro") ? 1 : 0);
+		fclose(fp);
+	}
+}
 #else
 #define test_fault(x) ((void)0)
 #define test_change_under(t) ((void)0)
+#define test_late_change(t) ((void)0)
 #endif
 
 /*
  * Returns 0 written and verified, 3 failed with devinfo as it was before,
- * 4 failed and devinfo may differ, 5 the read-only flags could not be
- * restored (the loudest failure: the guard has a hole until a reboot).
+ * 4 failed and devinfo may differ, 5 devinfo's read-only flag could not be
+ * set again (the loudest failure: the guard has a hole until a reboot).
  */
 static int window(const struct target *t, const uint8_t *orig, size_t len, uint8_t newval)
 {
@@ -916,23 +970,21 @@ static int window(const struct target *t, const uint8_t *orig, size_t len, uint8
 		raise(SIGSTOP);
 #endif
 
-	/* 1. The disk: the kernel won't write a partition of a read-only disk. */
-	if (ro_set(&t->disk, 0) || ro_get(&t->disk, NULL) != 0) {
-		err("%s did not become writable; nothing written", t->disk.name);
+	/*
+	 * 1. The disk's own flag is clear (the guard since #252), so what devinfo
+	 * reads is its own flag: set by the guard, or this is not the phone the
+	 * checks saw a moment ago.
+	 */
+	test_late_change(t);
+	if (disk_flag(&t->disk) != 0) {
+		err("%s's own read-only flag is set or unreadable; nothing written", t->disk.name);
 		goto close_window;
 	}
-	/* 2. With the disk flag clear, each partition reads its own flag: all set. */
-	for (int i = 0; i < t->nsib; i++)
-		if (ro_get(&t->sib[i], &t->disk) != 1) {
-			err("%s's own read-only flag is clear or unreadable: clearing %s's would expose it; refusing",
-			    t->sib[i].name, t->disk.name);
-			goto close_window;
-		}
 	if (ro_get(&t->part, &t->disk) != 1) {
 		err("devinfo's own read-only flag was already clear; the guard did not set it; refusing");
 		goto close_window;
 	}
-	/* 3. devinfo itself. */
+	/* 2. devinfo itself, alone. */
 	if (!child_alive(child, &reaped, &st)) {
 		err("the relock child is gone; nothing written");
 		goto close_window;
@@ -942,7 +994,7 @@ static int window(const struct target *t, const uint8_t *orig, size_t len, uint8
 		goto close_window;
 	}
 	test_change_under(t);
-	/* 4. Nothing moved since the checks. */
+	/* 3. Nothing moved since the checks. */
 	again = read_image(&t->part, &alen);
 	if (!again || alen != len || memcmp(again, orig, len)) {
 		err("devinfo changed since it was checked; nothing written");
@@ -952,7 +1004,7 @@ static int window(const struct target *t, const uint8_t *orig, size_t len, uint8
 	free(again);
 	test_fault("kill-before-write");
 
-	/* 5. The one byte (the kernel writes the 4 KiB block that holds it). */
+	/* 4. The one byte (the kernel writes the 4 KiB block that holds it). */
 	want = malloc(len);
 	if (!want)
 		goto close_window;
@@ -973,7 +1025,7 @@ static int window(const struct target *t, const uint8_t *orig, size_t len, uint8
 	}
 	test_fault("kill-after-write");
 
-	/* 6. Read back past the cache: everything as before but that byte. */
+	/* 5. Read back past the cache: everything as before but that byte. */
 	after = read_image(&t->part, &alen);
 	if (after && alen == len && !memcmp(after, want, len)) {
 		rc = 0;
@@ -1005,9 +1057,9 @@ write_failed:
 		err("devinfo no longer reads as before; restore it from the backup");
 
 close_window:
-	/* 7. Read-only again, devinfo then the disk, each read back; then the child. */
+	/* 6. devinfo read-only again, read back; then the child. */
 	if (relock(t)) {
-		err("FAILED to set devinfo or %s read-only again; reboot to restore the guard", t->disk.name);
+		err("FAILED to set devinfo read-only again; reboot to restore the guard");
 		rc = 5;
 	}
 	close(wfd);
@@ -1175,7 +1227,7 @@ static int cmd_mark(int do_write, const char *expect, const char *codename)
 	if (after)
 		print_bytes("after ", after);
 	if (rc == 0) {
-		printf("slot b marked successful: written, read back, devinfo and %s read-only again\n", t.disk.name);
+		printf("slot b marked successful: written, read back, devinfo read-only again\n");
 	}
 out:
 	free(after);

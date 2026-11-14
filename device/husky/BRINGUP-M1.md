@@ -198,41 +198,40 @@ The tool is `omamobile-bootctl` from `omamobile-device-husky`
 the tegu package; this phone's values in `bootctl/bootctl-device.h`). It
 refuses another board, a devinfo version other than 3.15 (the one recorded
 for husky: [BATTERY-NOTES](BATTERY-NOTES.md) "The cure exists", and two owners' phones on #252), a boot from slot A, a slot B that isn't active or is
-marked unbootable, and a storage guard that isn't holding (the main LUN's
-whole-disk node usable, or any disk or partition outside `UFS_RW` writable).
+marked unbootable, and a storage guard that isn't holding: a whole-disk
+node for a boot LUN, a usable one for the main LUN, a partition outside
+`UFS_RW` writable, or the boot LUN read-only at the disk level (an initramfs
+from before the boot-LUN guard, [#484](https://github.com/derekross/omarchy-mobile/pull/484)).
 It prints the devinfo version and the eight slot bytes 0x30-0x37, decoded,
 and nothing else from the partition.
 
-**Its read-write window.** The kernel can't write a partition of a read-only
-disk: `bdev_read_only()` is the partition's own flag OR its disk's
-(`include/linux/blkdev.h`), and the write path (`blkdev_write_iter()`), the
-`BLKROGET` ioctl and sysfs `ro` all use it. So `devinfo` can't be made
-writable while its boot LUN stays read-only, and the tool clears the LUN's
-flag too, for as long as the one byte takes. **That exposes the whole LUN:**
-while the disk's flag is clear, the whole-disk node is writable, and raw
-writes through it reach every byte of the LUN, the other partitions on it
-(`pinfo`, `blenv` and `mfg_data`) included; their own flags guard only their own nodes. Whether
-that is acceptable is the maintainer's ruling on #252 and this tool waits
-for it. The recommendation is to guard the boot LUNs as the main LUN is
-guarded (whole-disk node removed, each partition's own flag set) in a
-separate change tested on the 7 Pro; with that in place the window becomes
-devinfo's flag alone.
+**Its read-write window is `devinfo`'s own flag, alone.** The kernel counts
+a partition read-only when its own flag or its disk's is set
+(`bdev_read_only()` in `include/linux/blkdev.h`; the write path, the
+`BLKROGET` ioctl and sysfs `ro` all use it). The first version of this tool
+had to clear the boot LUN's disk flag to reach `devinfo`, which made the
+whole LUN writable through its whole-disk node for as long as the write
+took. The maintainer's ruling on #252 was to guard the boot LUNs as the main
+LUN is guarded first (#484: every whole-disk node removed, the disks' own
+flags clear, each partition's own flag set). On that guard the tool clears
+`devinfo`'s own flag and nothing else: no disk flag is touched, there is no
+whole-disk node, and no other partition of the LUN is writable for a
+moment. Under an initramfs from before #484 it refuses.
 
-The window, in order: refuse if devinfo, its LUN or a sibling is mounted or
-held, or open for writing by any other process (checked again right before
-the window, after the codename); the disk writable, and checked; each
-sibling's and devinfo's own flag checked (the only moment a partition's own
-flag can be read; any clear or unreadable one closes the window); devinfo
+The window, in order: refuse if the guard isn't as above, or if devinfo, its
+LUN or a sibling is mounted or held, or open for writing by any other
+process (checked again right before the window, after the codename); the
+disk's own flag read clear and devinfo's own flag read set; devinfo
 writable; devinfo read again and compared with what the checks saw; the
 byte at 0x35 (slot B's flags) changed by OR 0x02 with `O_DSYNC` (the kernel
 writes the 4 KiB block that holds it); the whole partition read back past the
 page cache (`O_DIRECT`) and compared with the prediction (on a mismatch the
 original is written back and read back, and the tool fails); devinfo
-read-only and checked; the disk read-only and checked. ^C, SIGTERM and SIGHUP
-are blocked. A relock child, started before the window, sets both flags back
-the moment the tool exits or is killed, and from the moment the window
-opens it also sets them back every 10 s for as long as the tool lives (a
-stopped or hung tool), so the window can't stay open unwatched.
+read-only and checked. ^C, SIGTERM and SIGHUP are blocked. A relock child,
+started before the window, sets devinfo's flag back the moment the tool
+exits or is killed, and from the moment the window opens it also sets it
+back every 10 s for as long as the tool lives (a stopped or hung tool), so
+the window can't stay open unwatched.
 
 Each step: risk, command, expect / pass, stop, rollback. Record the results
 here with the date and `uname -r`. Post only the version and the eight slot
@@ -269,12 +268,12 @@ bytes, never a dump.
    --expect "<the eight bytes from step 3>"`. Nothing changes on the screen.
    **Expect:** exit 0, `before` and `after` lines that differ only in byte
    0x35 by 0x02, then `slot b marked successful: written, read back, devinfo
-   and <its LUN> read-only again`. **Stop:** any other exit, and don't run it
+   read-only again`. **Stop:** any other exit, and don't run it
    again: exit 1 or 2 refused before anything was opened; 3, the write
    failed or was put back and devinfo reads as before; 4, devinfo may differ
-   from the backup (don't reboot; post the output and wait); 5, a read-only
-   flag could not be restored (`systemctl reboot`: the initramfs sets it
-   again). **Rollback:** the mark is undone by flashing slot B's images
+   from the backup (don't reboot; post the output and wait); 5, devinfo's
+   read-only flag could not be set again (`systemctl reboot`: the initramfs
+   sets it again). **Rollback:** the mark is undone by flashing slot B's images
    (`bin/omamobile flash` with a known-good set), which clears it; the
    step 4 backup is for exit 4, and writing it back is the maintainer's call.
 6. **Read back** (none; read-only). `omamobile-bootctl status` again, then
