@@ -73,13 +73,19 @@ Keeping stock on slot A is how we avoid bricking phones during development, not 
 - **The initramfs's no-USB-host panic needs a review for the phone.** On an A/B phone it hands over to stock on slot A; on a single-slot phone it would restart into the same image. The device's descriptor and plan say what happens instead (stay up with the screen lit, or reboot into fastboot) before the first boot.
 - **Everything else in this section still applies:** never relock with a non-stock image, never flash an older factory image, the backup rules, the hang safety nets.
 
+Phones with an entry:
+
+| Device | Boot partition the installer may write | Fastboot by buttons | Forced restart |
+| --- | --- | --- | --- |
+| Xiaomi Mi 8 (`dipper`) | `boot` only; stock `dtbo` stays untouched | Power off, then hold Volume Down + Power until FASTBOOT appears. | Hold Power alone for 10 seconds; confirmed to restart into Android under the Omarchy Mobile kernel. |
+
 ### 3.2 The read-only storage guard
 
 UFS holds the per-device calibration. The initramfs ([`initramfs/init`](initramfs/init)) guards it before anything else runs:
 
 - It sets every SCSI partition's own read-only flag (`blockdev --setro`) as soon as it appears, and keeps a watcher running for the life of PID 1.
-- The only exceptions are an allowlist of GPT partition names on the main LUN (`sda`): the device's `BOOT_IMAGES` on slot B, and `userdata`.
-- It deletes the whole-disk node of every LUN (`/dev/sda`, and the boot LUNs' `/dev/sdb`, `/dev/sdc`, `/dev/sdd`), so nothing can write across partitions, and leaves the disks' own flags clear. The kernel counts a partition read-only when its own flag or its disk's is set (`bdev_read_only()`), so a disk flag would hide every partition on that LUN, and opening one would mean opening all of them through the whole-disk node ([#252](https://github.com/derekross/omarchy-mobile/issues/252)). Before handing over to Arch it stays in the initramfs if any whole-disk node is still there or any partition outside the allowlist is writable.
+- The only exceptions are an allowlist of GPT partition names on the main LUN (`sda`), and on a LUN the descriptor's `UFS_RW_LUNS` names: the device's `BOOT_IMAGES` on slot B, and `userdata`.
+- It deletes the whole-disk node of every LUN (`/dev/sda`, and the boot LUNs' `/dev/sdb`, `/dev/sdc`, `/dev/sdd`), so nothing can write across partitions, and leaves the disks' own flags clear. The kernel counts a partition read-only when its own flag or its disk's is set (`bdev_read_only()`), so a disk flag would hide every partition on that LUN, and opening one would mean opening all of them through the whole-disk node ([#252](https://github.com/derekross/omarchy-mobile/issues/252)). Before handing over to Arch it stays in the initramfs if any whole-disk node is still there or any partition outside the allowlist is writable. With an NFS root nothing on the UFS is written: the allowlist isn't loaded, and `sda` keeps its node and is read-only at the disk level as well.
 - In Arch, [`10-omamobile-storage.rules`](packages/omamobile-device-cheetah/vendor/udev/rules.d/10-omamobile-storage.rules) keeps the main LUN's whole-disk node unusable, should it ever come back (devtmpfs makes a node only when the kernel adds a device), and hides the Android partitions from desktop tools.
 - The one write outside the allowlist is the boot-success marker (`omamobile-boot-success`). It clears `devinfo`'s own flag alone for a single verified write of the slot flag bytes, then sets it read-only again; no disk flag is touched (under an initramfs from before #252, which still sets the disk flag, it opens the disk too, as it always did).
 
@@ -141,7 +147,7 @@ tools/build-packages           # [omamobile] for aarch64 into out/repo, signed
 tools/build-rootfs             # out/omamobile-rootfs-<device>-<date>-aarch64.img.zst
 tools/install-phone --dry-run  # checks, questions, the exact commands; then without --dry-run
 # after the first boot: a read-only backup of the modem's partitions into DIR (REINSTALL-RUNBOOK 4a)
-tools/phone-provision --nv-backup DIR FACTORY.zip   # firmware and per-phone data
+tools/phone-provision --first-install --nv-backup DIR FACTORY.zip   # firmware and per-phone data
 
 # Phone in fastboot (developer loop, or when Linux won't boot)
 bin/omamobile fastboot         # get there without buttons, if possible

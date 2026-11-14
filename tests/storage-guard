@@ -9,7 +9,10 @@
 # exactly its six partitions writable, as the hard-coded list did. Every
 # LUN's whole-disk node is removed and its own flag left clear, and each
 # boot-LUN partition gets its own flag, so one partition (devinfo) can be
-# opened alone without a disk flag (#252, #483).
+# opened alone without a disk flag (#252, #483). A LUN named in UFS_RW_LUNS
+# (a test descriptor's sde, enchilada's layout) may hold allowlisted
+# partitions as sda does; without that list, or with a bad one or a closed
+# allowlist, every partition on it is read-only.
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
@@ -33,6 +36,8 @@ if [[ $(grep -c '^ *UFS_RW=' initramfs/init) != 2 ]] || ! grep -q '^UFS_RW=""$' 
   fail "initramfs/init has no allowlist of its own, only the packed one"
 fi
 grep -q '^  initramfs_config "\$stage/etc"$' bin/omamobile || fail "initramfs packs the files into the image's /etc"
+[[ ! -e $t/etc-cheetah/omamobile-ufs-rw-luns && ! -e $t/etc-oriole/omamobile-ufs-rw-luns ]] || fail "the Pixels pack no LUN list"
+pass "the Pixels pack no LUN list"
 pass "cheetah, felix and akita pack the six-name list, oriole and bluejay their three boot images and userdata"
 
 # --- Pack time: refused descriptors, in a repository-shaped tree ---
@@ -44,9 +49,17 @@ sed -e 's/^CODENAME=.*/CODENAME=six/' device/oriole/device.conf > "$R/device/six
 cp "$R/device/six/device.conf" "$t/good.conf"
 om() { (cd "$R" && DEVICE=six bin/omamobile "$@") > "$t/log" 2>&1; }
 om initramfs-config "$t/etc-six" || { cat "$t/log"; fail "the test descriptor packs"; }
-refused() { # what, UFS_RW value, expected message
+# A second test descriptor with enchilada's layout: boot_b on LUN sde
+mkdir -p "$R/device/lun"
+{ sed -e 's/^CODENAME=.*/CODENAME=lun/' device/enchilada/device.conf; echo UFS_RW_LUNS=sde; } > "$R/device/lun/device.conf"
+(cd "$R" && DEVICE=lun bin/omamobile initramfs-config "$t/etc-lun") > "$t/log" 2>&1 || { cat "$t/log"; fail "lun: initramfs-config"; }
+[[ $(cat "$t/etc-lun/omamobile-ufs-rw") == "boot_b userdata" && $(cat "$t/etc-lun/omamobile-ufs-rw-luns") == sde ]] \
+  || fail "the lun descriptor packs its UFS_RW and UFS_RW_LUNS"
+pass "a descriptor with UFS_RW_LUNS=sde packs boot_b userdata and its LUN sde"
+refused() { # what, value, expected message[, key appended instead of UFS_RW]
   cp "$t/good.conf" "$R/device/six/device.conf"
-  sed -i "s/^UFS_RW=.*/UFS_RW=\"$2\"/" "$R/device/six/device.conf"
+  if [[ -n ${4:-} ]]; then printf '%s="%s"\n' "$4" "$2" >> "$R/device/six/device.conf"
+  else sed -i "s/^UFS_RW=.*/UFS_RW=\"$2\"/" "$R/device/six/device.conf"; fi
   rm -rf "$t/etc-bad"
   if om initramfs-config "$t/etc-bad"; then fail "refuses $1"; fi
   grep -c -- "$3" "$t/log" >/dev/null || { cat "$t/log"; fail "refuses $1 with: $3"; }
@@ -65,6 +78,10 @@ refused "a name twice" "boot_b vendor_boot_b dtbo_b userdata boot_b" "names boot
 refused "upper case" "boot_b vendor_boot_b dtbo_b USERDATA" "only partition names"
 refused "a glob" "boot_b vendor_boot_b dtbo_b userdata *" "only partition names"
 refused "a boot image missing" "boot_b vendor_boot_b userdata" "dtbo_b is not in UFS_RW"
+refused "sda as an extra LUN" "sda" "UFS_RW_LUNS may hold only" UFS_RW_LUNS
+refused "a LUN path" "/dev/sde" "UFS_RW_LUNS may hold only" UFS_RW_LUNS
+refused "shell syntax in the LUN list" "sde;sdf" "UFS_RW_LUNS may hold only" UFS_RW_LUNS
+refused "a LUN with a partition number" "sde1" "UFS_RW_LUNS may hold only" UFS_RW_LUNS
 cp "$t/good.conf" "$R/device/six/device.conf"
 
 # --- Boot time: initramfs/init's guard against a fake sysfs and /dev ---
@@ -104,6 +121,7 @@ EOF
 chmod +x "$t/bin/blockdev" "$t/bin/sync-ro"
 parts="boot_a boot_b init_boot_b vendor_boot_b vendor_kernel_boot_b dtbo_b userdata persist efs modem_b vbmeta_b devinfo"
 boot_luns="sdb:bl1_a sdb:abl_a sdb:bl1_b sdc:bl1_b sdc:abl_b sdc:dtbo_b sdd:devinfo sdd:pinfo sdd:mfg_data"
+lun_parts="boot_a boot_b dtbo_b vbmeta_b"
 mkdisk() { mkdir -p "$B/sys/block/$1"; echo 0 > "$B/own/$1"; : > "$B/dev/$1"; }
 mkpart() { # disk name partname
   mkdir -p "$B/sys/block/$1/$2"
@@ -120,21 +138,25 @@ fake_disks() { # the main LUN, three boot LUNs (gs201's shape), every flag clear
   for d in sdb sdc sdd; do mkdisk $d; done
   i=0
   for p in $boot_luns; do d=${p%%:*} i=$((i + 1)); mkpart "$d" "$d$i" "${p#*:}"; done
+  # A LUN that holds slot B's boot image beside slot A's and vbmeta (enchilada)
+  mkdisk sde
+  i=0
+  for p in $lun_parts; do i=$((i + 1)); mkpart sde "sde$i" "$p"; done
   "$t/bin/sync-ro"
 }
 guard() { # run the guard's load and one pass
   PATH="$t/bin:$PATH" sh -c ". '$t/guard-test.sh'; ufs_ro_pass"
 }
-writable() { # names of the partitions left writable, in order (every LUN)
+writable() { # names of the partitions left writable, in order: on every LUN, or on the one named
   local s out=""
-  for s in "$B"/sys/block/sd*/sd*; do
+  for s in "$B"/sys/block/${1:-sd*}/sd*; do
     [[ $(cat "$s/ro") == 0 ]] && out+="$(sed -n 's/^PARTNAME=//p' "$s/uevent") "
   done
   printf '%s' "${out% }"
 }
-disk_checks() { # $1: case name
+disk_checks() { # $1: case name; $2: sde when sde is a listed LUN
   local d s
-  for d in sda sdb sdc sdd; do
+  for d in sda sdb sdc sdd sde; do
     [[ ! -e $B/dev/$d ]] || fail "$1: /dev/$d's whole-disk node is removed"
     [[ $(cat "$B/own/$d") == 0 && $(cat "$B/sys/block/$d/ro") == 0 ]] \
       || fail "$1: $d's own flag stays clear (the kernel ORs it into every partition)"
@@ -143,6 +165,9 @@ disk_checks() { # $1: case name
   for s in "$B"/sys/block/sd[b-d]/sd*; do
     [[ $(cat "$B/own/${s##*/}") == 1 ]] || fail "$1: boot-LUN partition ${s##*/}'s own flag is set"
   done
+  if [[ ${2:-} != sde ]]; then
+    [[ -z $(writable sde) ]] || fail "$1: an unlisted LUN's partitions are read-only, boot_b on it too (writable: $(writable sde))"
+  fi
   ! grep -qE ' sd[a-z]+$' "$B/blockdev.log" || fail "$1: blockdev never touches a whole disk ($(tr '\n' ' ' < "$B/blockdev.log"))"
 }
 
@@ -207,14 +232,42 @@ pass "a whole-disk node that comes back or won't go is reported, retried and kee
 fake_disks
 printf '%s\n' "$cheetah_rw" > "$B/etc/omamobile-ufs-rw"
 guard
-mkdisk sde; mkpart sde sde1 userdata; mkpart sde sde2 boot_b; "$t/bin/sync-ro"
-[[ $(unguarded | tr '\n' ' ') == "sde (whole-disk node) sde1 (userdata) sde2 (boot_b) " ]] \
+mkdisk sdf; mkpart sdf sdf1 userdata; mkpart sdf sdf2 boot_b; "$t/bin/sync-ro"
+[[ $(unguarded | tr '\n' ' ') == "sdf (whole-disk node) sdf1 (userdata) sdf2 (boot_b) " ]] \
   || fail "a late LUN is reported before the next pass (got: $(unguarded | tr '\n' ' '))"
 guard
-[[ ! -e $B/dev/sde && $(cat "$B/own/sde") == 0 && $(cat "$B/own/sde1") == 1 && $(cat "$B/own/sde2") == 1 ]] \
+[[ ! -e $B/dev/sdf && $(cat "$B/own/sdf") == 0 && $(cat "$B/own/sdf1") == 1 && $(cat "$B/own/sdf2") == 1 ]] \
   || fail "the next pass removes the late LUN's node and sets its partitions, allowlisted names too"
 [[ -z $(unguarded) ]] || fail "the guard holds again (got: $(unguarded))"
 pass "a LUN that appears late is guarded by the next pass; the allowlist opens nothing off the main LUN"
+
+fake_disks
+cp "$t/etc-cheetah/omamobile-ufs-rw" "$B/etc/omamobile-ufs-rw"
+printf '172.16.42.2:/srv/nfs/dipper\n' > "$B/etc/omamobile-nfsroot"
+guard
+[[ -z $(writable) ]] || fail "NFS root's first pass leaves all UFS partitions read-only"
+! grep -q 'ufs-ro: allowlist: ' "$B/dev/kmsg" || fail "NFS mode skips the packed allowlist"
+[[ $(cat "$B/sys/block/sda/ro") == 1 ]] || fail "NFS root marks the main UFS disk read-only"
+for d in sdb sdc sdd sde; do
+  [[ ! -e $B/dev/$d && $(cat "$B/own/$d") == 0 ]] || fail "NFS root guards $d as ever: the node removed, the disk flag clear"
+  for s in "$B"/sys/block/$d/sd*; do
+    [[ $(cat "$B/own/${s##*/}") == 1 ]] || fail "NFS root sets ${s##*/}'s own flag"
+  done
+done
+grep -q 'NFS root requested: every UFS partition read-only' "$B/dev/kmsg" || fail "NFS mode is selected before first guard pass"
+[[ -z $(unguarded) ]] || fail "NFS root handover has no writable UFS device"
+echo 0 > "$B/sys/block/sda/ro"
+[[ $(unguarded) == "sda" ]] || fail "NFS mode reports a writable main UFS disk"
+pass "NFS-root mode protects the main disk and every partition on the first guard pass, the other LUNs by their partitions' own flags"
+
+awk '/^boot_nfs\(\) \{/ {on = 1} on && /omamobile.initramfs/ {marker = NR} on && /switch_root/ {handover = NR} on && /^}/ {exit} END {exit !(marker && handover && marker < handover)}' initramfs/init \
+  || fail "boot_nfs honors omamobile.initramfs before switching roots"
+awk '/^boot_nfs\(\) \{/ {on = 1} on && /ufs_unguarded/ {u = NR} on && /kill -9 -1/ {k = NR} on && /^}/ {exit} END {exit !(u && k && u < k)}' initramfs/init \
+  || fail "boot_nfs checks ufs_unguarded before it stops the initramfs's processes"
+grep -q 'busybox mount -t nfs' initramfs/init || fail "NFS root uses BusyBox mount on minimal initramfs images"
+awk '/^if \[ -s \/etc\/omamobile-nfsroot \]; then/ {on = 1} on && /^else$/ {exit} on && /boot_nfs/ {nfs = 1} on && /boot_arch/ {arch = 1} END {exit !(nfs && !arch)}' initramfs/init \
+  || fail "a failed requested NFS mount cannot fall through to boot_arch"
+pass "NFS cmdline opt-out works and a failed mount stays in the initramfs"
 
 fake_disks
 cp "$t/etc-oriole/omamobile-ufs-rw" "$B/etc/omamobile-ufs-rw"
@@ -246,3 +299,39 @@ fake_disks; printf 'boot_b vendor_boot_b dtbo_b userdata persist\n' > "$B/etc/om
 closed "persist in the allowlist" "allowlist names persist"
 fake_disks; printf 'boot_a userdata\n' > "$B/etc/omamobile-ufs-rw"
 closed "a slot A name in the allowlist" "allowlist names boot_a"
+
+# --- A second LUN: boot_b on sde (enchilada's layout) ---
+unguarded() { PATH="$t/bin:$PATH" sh -c ". '$t/guard-test.sh'; ufs_unguarded"; }
+fake_disks
+cp "$t/etc-lun/omamobile-ufs-rw" "$t/etc-lun/omamobile-ufs-rw-luns" "$B/etc/"
+guard
+[[ $(writable sde) == boot_b ]] || fail "lun: only boot_b is writable on sde (got: $(writable sde))"
+[[ $(writable sda) == "boot_b userdata" ]] || fail "lun: its names on sda (got: $(writable sda))"
+[[ -z $(writable 'sd[b-d]') ]] || fail "lun: nothing on the boot LUNs (got: $(writable 'sd[b-d]'))"
+grep -q "LUNs with allowlisted partitions: sda sde" "$B/dev/kmsg" || fail "lun: the LUN list is logged"
+disk_checks lun sde
+[[ -z $(unguarded) ]] || fail "lun: nothing outside the allowlist is writable (got: $(unguarded))"
+PATH="$t/bin:$PATH" blockdev --setrw "$B/dev/sde4"
+[[ $(unguarded) == "sde4 (vbmeta_b)" ]] || fail "lun: a reopened partition on sde is reported (got: $(unguarded))"
+pass "the lun lists: boot_b alone writable on sde; the hand-over check covers sde"
+
+fake_disks
+cp "$t/etc-lun/omamobile-ufs-rw" "$B/etc/"
+guard
+disk_checks "lun without its LUN list"
+pass "without UFS_RW_LUNS, every partition on sde stays read-only, boot_b too"
+
+for bad in 'sde sda' 'sde;sdf' '/dev/sde' 'sde1' 'SDE'; do
+  fake_disks
+  cp "$t/etc-lun/omamobile-ufs-rw" "$B/etc/"
+  printf '%s\n' "$bad" > "$B/etc/omamobile-ufs-rw-luns"
+  guard
+  grep -q "malformed LUN list" "$B/dev/kmsg" || { cat "$B/dev/kmsg"; fail "LUN list '$bad': says so on kmsg"; }
+  disk_checks "LUN list '$bad'"
+  [[ $(writable) == "boot_b userdata" ]] || fail "LUN list '$bad': sda keeps its allowlist (got: $(writable))"
+done
+pass "a malformed LUN list opens nothing off sda"
+
+fake_disks
+printf 'boot_b userdata persist\n' > "$B/etc/omamobile-ufs-rw"; printf 'sde\n' > "$B/etc/omamobile-ufs-rw-luns"
+closed "a closed allowlist with a LUN list" "allowlist names persist"
